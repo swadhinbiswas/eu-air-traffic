@@ -21,6 +21,9 @@ dependencies = [
     "pyopensky>=2.16",
     "opensky-api",
     "traffic>=2.13",
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+    "huggingface_hub>=0.23.0",
 ]
 
 [project.optional-dependencies]
@@ -32,8 +35,6 @@ dev = [
     "mypy>=1.10.0",
     "dbt-duckdb>=1.8.0",
     "httpx>=0.27.0",
-    "streamlit>=1.40.0",
-    "plotly>=5.24.0",
 ]
 
 [project.scripts]
@@ -64,6 +65,9 @@ exclude_lines = [
     "pragma: no cover",
 ]
 show_missing = true
+
+[tool.uv]
+package = true
 
 [tool.uv.sources]
 opensky-api = { git = "https://github.com/openskynetwork/opensky-api.git", subdirectory = "python" }
