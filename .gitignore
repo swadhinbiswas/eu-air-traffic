@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+credentials.json
+*.secret
+secrets/
+
+# Data artifacts
+warehouse/raw/
+warehouse/bronze/
+warehouse/silver/
+warehouse/gold/
+warehouse/quarantine/
+warehouse/checkpoints/
+warehouse/dashboard.html
+warehouse/*.duckdb
+warehouse/
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp

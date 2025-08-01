@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run mypy config ingestion pipelines apps scripts --ignore-missing-imports
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    env:
+      MOCK_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests + coverage gate
+        run: uv run pytest tests/ --cov-fail-under=50
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: htmlcov
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-end mock pipeline
+    runs-on: ubuntu-latest
+    env:
+      MOCK_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run full pipeline
+        run: uv run python -m pipelines.orchestrator
+
+      - name: Validate warehouse
+        run: |
+          uv run python - <<'EOF'
+          import duckdb
+          con = duckdb.connect('warehouse/air_traffic.duckdb', read_only=True)
+          n = con.execute('SELECT COUNT(*) FROM fact_flights').fetchone()[0]
+          assert n > 0, "fact_flights is empty"
+          print(f"fact_flights has {n} rows — OK")
+          EOF
+
+      - name: Build dbt models + tests
+        working-directory: dbt
+        run: |
+          ../.venv/bin/dbt build --profiles-dir . || uv run dbt build --profiles-dir .
+
+      - name: Generate dbt docs (catalog)
+        working-directory: dbt
+        run: uv run dbt docs generate --profiles-dir . || true

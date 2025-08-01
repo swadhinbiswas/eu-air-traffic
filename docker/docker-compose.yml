@@ -1,0 +1,57 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: air-traffic-api
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      MOCK_MODE: ${MOCK_MODE:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../warehouse:/app/warehouse
+    restart: unless-stopped
+
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    container_name: air-traffic-superset
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-please-change-me-in-production}
+      SUPERSET_LOAD_EXAMPLES: "no"
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ../warehouse:/app/warehouse
+    command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
+    restart: unless-stopped
+
+  superset-init:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    container_name: air-traffic-superset-init
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-please-change-me-in-production}
+      SUPERSET_LOAD_EXAMPLES: "no"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/init_superset.py:/app/scripts/init_superset.py:ro
+      - ../warehouse:/app/warehouse
+    command: >
+      bash -c "
+      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin --no-input &&
+      superset db upgrade &&
+      superset init &&
+      python /app/scripts/init_superset.py
+      "
+    depends_on:
+      - superset

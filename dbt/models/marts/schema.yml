@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: airport_metrics
+    description: Per-airport KPI summary (flights, avg delay, on-time rate).
+    columns:
+      - name: airport_icao
+        tests:
+          - not_null
+      - name: total_flights
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        tests:
+          - not_null
+
+  - name: airline_rankings
+    description: Airline performance ranking by average delay.
+    columns:
+      - name: airline_icao
+        tests:
+          - not_null
+          - unique
+      - name: rank
+        tests:
+          - not_null
+
+  - name: delay_analysis
+    description: Delay breakdown by flight status.
+    columns:
+      - name: status
+        tests:
+          - not_null
+
+  - name: weather_impact
+    description: Weather condition impact on average delays.
+    columns:
+      - name: weather_condition
+        tests:
+          - not_null
+          - unique
+
+  - name: seasonal_trends
+    description: Daily/hourly traffic volumes and average delays.
+    columns:
+      - name: flight_date
+        tests:
+          - not_null

@@ -1,0 +1,13 @@
+air_traffic:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../warehouse/air_traffic.duckdb
+      schema: main
+      threads: 4
+    ci:
+      type: duckdb
+      path: ../warehouse/ci.duckdb
+      schema: main
+      threads: 2
