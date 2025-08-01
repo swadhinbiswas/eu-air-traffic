@@ -44,19 +44,16 @@ dependencies = [
     { name = "fastapi" },
     { name = "holidays" },
     { name = "huggingface-hub" },
-    { name = "opensky-api" },
     { name = "pandas" },
     { name = "plotly" },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pyopensky" },
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "rich" },
     { name = "streamlit" },
-    { name = "traffic" },
     { name = "uvicorn" },
 ]
 
@@ -70,6 +67,11 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+etl = [
+    { name = "opensky-api" },
+    { name = "pyopensky" },
+    { name = "traffic" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -81,14 +83,14 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "huggingface-hub", specifier = ">=0.23.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
-    { name = "opensky-api", git = "https://github.com/openskynetwork/opensky-api.git?subdirectory=python" },
+    { name = "opensky-api", marker = "extra == 'etl'", git = "https://github.com/openskynetwork/opensky-api.git?subdirectory=python" },
     { name = "pandas", specifier = "==2.2.3" },
-    { name = "plotly", specifier = ">=5.18.0" },
+    { name = "plotly", specifier = ">=5.24.0" },
     { name = "polars", specifier = ">=0.20.31" },
     { name = "pyarrow", specifier = ">=16.1.0" },
     { name = "pydantic", specifier = ">=2.7.4" },
     { name = "pydantic-settings", specifier = ">=2.3.4" },
-    { name = "pyopensky", specifier = ">=2.16" },
+    { name = "pyopensky", marker = "extra == 'etl'", specifier = ">=2.16" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
@@ -96,11 +98,11 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "rich", specifier = ">=13.7.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.9" },
-    { name = "streamlit", specifier = ">=1.30.0" },
-    { name = "traffic", specifier = ">=2.13" },
+    { name = "streamlit", specifier = ">=1.40.0" },
+    { name = "traffic", marker = "extra == 'etl'", specifier = ">=2.13" },
     { name = "uvicorn", specifier = ">=0.30.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["etl", "dev"]
 
 [[package]]
 name = "altair"
