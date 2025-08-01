@@ -36,25 +36,42 @@ export default function App() {
         URL.revokeObjectURL(worker_url)
 
         setStatus("Connecting to Hugging Face Data Lake...")
-        const hfUrl = 'https://huggingface.co/datasets/swadhinbiswas/air-traffic/resolve/main/air_traffic.duckdb'
         
-        await db.registerFileURL('air_traffic.duckdb', hfUrl, duckdb.DuckDBDataProtocol.HTTP, false)
         const conn = await db.connect()
-        
-        setIsConnected(true)
-        setStatus("Connected to HF Data Lake (Live)")
+        const HF_BASE = 'https://huggingface.co/datasets/swadhinbiswas/air-traffic/resolve/main'
 
-        // Attach the database file
-        await conn.query(`ATTACH 'air_traffic.duckdb' AS air_traffic (READ_ONLY)`)
+        // Create views over the remote Parquet files
+        await conn.query(`
+          CREATE OR REPLACE VIEW fact_flights AS 
+          SELECT * FROM read_parquet('${HF_BASE}/flights/data.parquet')
+        `)
+        
+        await conn.query(`
+          CREATE OR REPLACE VIEW dim_airport AS 
+          SELECT * FROM read_parquet('${HF_BASE}/airports/airports.parquet')
+        `)
+        
+        await conn.query(`
+          CREATE OR REPLACE VIEW gold_airport_metrics AS 
+          SELECT * FROM read_parquet('${HF_BASE}/airport_metrics/airport_metrics.parquet')
+        `)
+        
+        await conn.query(`
+          CREATE OR REPLACE VIEW gold_airline_rankings AS 
+          SELECT * FROM read_parquet('${HF_BASE}/airline_rankings/airline_rankings.parquet')
+        `)
+
+        setIsConnected(true)
+        setStatus("Connected to HF Parquet Lake (Live)")
 
         // Queries
-        const flightsRes = await conn.query(`SELECT COUNT(*) as total FROM air_traffic.fact_flights`)
+        const flightsRes = await conn.query(`SELECT COUNT(*) as total FROM fact_flights`)
         const totalFlights = Number(flightsRes.toArray()[0].total)
         
-        const delayRes = await conn.query(`SELECT AVG(delay_minutes) as avg_d FROM air_traffic.fact_flights WHERE status != 'cancelled'`)
+        const delayRes = await conn.query(`SELECT AVG(delay_minutes) as avg_d FROM fact_flights WHERE status != 'cancelled'`)
         const avgDelay = Number(delayRes.toArray()[0].avg_d).toFixed(1)
         
-        const airportsRes = await conn.query(`SELECT COUNT(*) as c FROM air_traffic.dim_airport`)
+        const airportsRes = await conn.query(`SELECT COUNT(*) as c FROM dim_airport`)
         const totalAirports = Number(airportsRes.toArray()[0].c)
 
         setStats(prev => ({
@@ -66,7 +83,7 @@ export default function App() {
 
         const topAirports = await conn.query(`
           SELECT airport_icao as icao, CAST(total_flights AS DOUBLE) as flights 
-          FROM air_traffic.gold_airport_metrics 
+          FROM gold_airport_metrics 
           ORDER BY total_flights DESC LIMIT 10
         `)
         setAirportData(topAirports.toArray().map((row: any) => ({
@@ -76,7 +93,7 @@ export default function App() {
 
         const airlines = await conn.query(`
           SELECT airline_icao as icao, CAST(on_time_rate * 100 AS DOUBLE) as otp
-          FROM air_traffic.gold_airline_rankings
+          FROM gold_airline_rankings
           ORDER BY total_flights DESC LIMIT 10
         `)
         setAirlineData(airlines.toArray().map((row: any) => ({
