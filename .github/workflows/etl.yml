@@ -55,6 +55,9 @@ jobs:
         working-directory: dbt
         run: uv run dbt build --profiles-dir .
 
+      - name: Upload to Hugging Face Hub
+        run: uv run python -m scripts.upload_hf
+
       - name: Upload pipeline report
         uses: actions/upload-artifact@v4
         with:
