@@ -60,7 +60,6 @@ def download_warehouse(app_settings: Any = None) -> dict[str, Any]:
                 repo_type="dataset",
                 token=s.huggingface_token,
                 local_dir=str(s.warehouse_dir),
-                local_dir_use_symlinks=False,
             )
             downloaded += 1
             logger.debug("[hf-download] downloaded %s", item.path)

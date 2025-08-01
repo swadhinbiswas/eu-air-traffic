@@ -83,16 +83,23 @@ def upload_warehouse() -> dict[str, Any]:
     repo = settings.huggingface_repo
     api.create_repo(repo_id=repo, repo_type="dataset", exist_ok=True)
 
+    from huggingface_hub import CommitOperationAdd
+
     uploads = _plan_uploads()
     logger.info("[hf] uploading %s artifacts to %s", len(uploads), repo)
 
-    uploaded = 0
-    with api.create_commit(
-        repo_id=repo, repo_type="dataset", commit_message="chore: ETL data refresh"
-    ) as commit_ctx:
-        for local_path, repo_path in uploads:
-            commit_ctx.upload_file(path_or_fileobj=str(local_path), path_in_repo=repo_path)
-            uploaded += 1
+    operations = [
+        CommitOperationAdd(path_in_repo=repo_path, path_or_fileobj=str(local_path))
+        for local_path, repo_path in uploads
+    ]
+    
+    api.create_commit(
+        repo_id=repo, 
+        repo_type="dataset", 
+        commit_message="chore: ETL data refresh",
+        operations=operations
+    )
+    uploaded = len(operations)
 
     logger.info("[hf] uploaded %s artifacts to %s", uploaded, repo)
     return {"uploaded": uploaded, "repo": repo}
