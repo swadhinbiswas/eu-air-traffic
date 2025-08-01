@@ -1,9 +1,5 @@
 import { useEffect, useState } from 'react'
 import * as duckdb from '@duckdb/duckdb-wasm'
-import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url'
-import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url'
-import duckdb_wasm_eh from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url'
-import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -11,16 +7,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Plane, Activity, Clock, Database, Map as MapIcon, RefreshCcw } from 'lucide-react'
 import { motion } from 'framer-motion'
 
-const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
-  mvp: {
-    mainModule: duckdb_wasm,
-    mainWorker: mvp_worker,
-  },
-  eh: {
-    mainModule: duckdb_wasm_eh,
-    mainWorker: eh_worker,
-  },
-}
 
 export default function App() {
   const [_, setDb] = useState<duckdb.AsyncDuckDB | null>(null)
@@ -33,8 +19,11 @@ export default function App() {
   useEffect(() => {
     async function initDuckDB() {
       try {
-        const bundle = await duckdb.selectBundle(MANUAL_BUNDLES)
-        const worker = new Worker(bundle.mainWorker!)
+        const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles()
+        const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES)
+        
+        // Use createWorker from duckdb to handle CDN CORS correctly
+        const worker = await duckdb.createWorker(bundle.mainWorker!)
         const logger = new duckdb.VoidLogger()
         const db = new duckdb.AsyncDuckDB(logger, worker)
         await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
