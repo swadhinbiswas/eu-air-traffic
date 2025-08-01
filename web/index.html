@@ -1,94 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Air Traffic Edge | Live Analytics</title>
-    <meta name="description" content="Lightning-fast European aviation analytics powered by DuckDB-WASM at the edge.">
-    
-    <!-- Modern Typography -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="style.css">
-    
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <!-- DuckDB WASM (Loaded dynamically in app.js) -->
-</head>
-<body>
-    <div class="background-effects">
-        <div class="glow-orb orb-1"></div>
-        <div class="glow-orb orb-2"></div>
-    </div>
-
-    <main class="dashboard">
-        <header class="topbar glass-panel">
-            <div class="logo">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.2-1.1.6L3 8l6 4-4 4-2.8-.9c-.4-.1-.8.2-1 .6L1 17l4.5 1.5L7 23l1.2-1.2c.4-.2.7-.6.6-1l-.9-2.8 4-4 4 6 1.2-.7c.4-.2.7-.6.6-1.1z"/></svg>
-                <h1>Air Traffic Edge</h1>
-            </div>
-            <div class="status-indicator">
-                <div class="pulse-dot" id="connection-dot"></div>
-                <span id="connection-status">Initializing WASM Engine...</span>
-            </div>
-        </header>
-
-        <div class="kpi-grid">
-            <div class="kpi-card glass-panel fade-in" style="animation-delay: 0.1s">
-                <h3>Total Flights</h3>
-                <div class="value" id="kpi-flights">--</div>
-                <div class="trend positive">Live from Hugging Face Data Lake</div>
-            </div>
-            <div class="kpi-card glass-panel fade-in" style="animation-delay: 0.2s">
-                <h3>Avg Delay</h3>
-                <div class="value" id="kpi-delay">--</div>
-                <div class="trend negative">Minutes per flight</div>
-            </div>
-            <div class="kpi-card glass-panel fade-in" style="animation-delay: 0.3s">
-                <h3>Active Airports</h3>
-                <div class="value" id="kpi-airports">--</div>
-                <div class="trend neutral">European coverage</div>
-            </div>
-            <div class="kpi-card glass-panel fade-in" style="animation-delay: 0.4s">
-                <h3>Data Size</h3>
-                <div class="value" id="kpi-size">--</div>
-                <div class="trend positive">Zero-copy DuckDB</div>
-            </div>
-        </div>
-
-        <div class="charts-grid">
-            <div class="chart-container glass-panel fade-in" style="animation-delay: 0.5s">
-                <div class="chart-header">
-                    <h2>Top Airports by Volume</h2>
-                    <span class="badge">Real-time</span>
-                </div>
-                <div class="canvas-wrapper">
-                    <canvas id="airportsChart"></canvas>
-                </div>
-            </div>
-            
-            <div class="chart-container glass-panel fade-in" style="animation-delay: 0.6s">
-                <div class="chart-header">
-                    <h2>Airline On-Time Performance</h2>
-                    <span class="badge">Benchmarking</span>
-                </div>
-                <div class="canvas-wrapper">
-                    <canvas id="airlinesChart"></canvas>
-                </div>
-            </div>
-        </div>
-        
-        <div class="logs-panel glass-panel fade-in" style="animation-delay: 0.7s">
-            <div class="chart-header">
-                <h2>Edge Engine Console</h2>
-            </div>
-            <pre id="console-logs" class="terminal"></pre>
-        </div>
-    </main>
-
-    <script type="module" src="app.js"></script>
-</body>
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Air Traffic Edge</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
