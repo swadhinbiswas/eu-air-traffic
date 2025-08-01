@@ -6,7 +6,16 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // Suppress DuckDB/Arrow sourcemap warnings
+        if (warning.message.includes('Sourcemap for') && warning.message.includes('outside its package')) return;
+        warn(warning);
+      }
+    }
+  }
 })
