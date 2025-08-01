@@ -66,15 +66,7 @@ A quick summary of what this project demonstrates, for anyone scanning the repo:
 
 ## Architecture
 
-```
-Sources                 Collectors              Medallion Warehouse                Analytics
------------             -----------             -------------------                ---------
-OpenSky          -->    FlightCollector    -->  Bronze (raw JSONL)            -->  DuckDB Star Schema
-OpenWeather      -->    WeatherCollector   -->  Silver (clean/validate)       -->  Gold Marts (dbt)
-AviationStack    -->    FuelCollector      -->  Gold (analytics marts)        -->  Dashboard (HTML)
-OpenFlights      -->    AirportCollector   -->  Quarantine (dead-letter)      -->  API (FastAPI)
-Holidays API     -->    HolidayCollector   -->  Checkpoints (watermarks)      -->  HF Hub (versioned)
-```
+![Platform Architecture](images/1.png)
 
 **Pipeline flow:** `collect → bronze → silver → gold → warehouse → quality report → (optional) HF upload`
 
