@@ -44,14 +44,17 @@ export default function App() {
         setIsConnected(true)
         setStatus("Connected to HF Data Lake (Live)")
 
+        // Attach the database file
+        await conn.query(`ATTACH 'air_traffic.duckdb' AS air_traffic (READ_ONLY)`)
+
         // Queries
-        const flightsRes = await conn.query(`SELECT COUNT(*) as total FROM 'air_traffic.duckdb'.fact_flights`)
+        const flightsRes = await conn.query(`SELECT COUNT(*) as total FROM air_traffic.fact_flights`)
         const totalFlights = Number(flightsRes.toArray()[0].total)
         
-        const delayRes = await conn.query(`SELECT AVG(delay_minutes) as avg_d FROM 'air_traffic.duckdb'.fact_flights WHERE status != 'cancelled'`)
+        const delayRes = await conn.query(`SELECT AVG(delay_minutes) as avg_d FROM air_traffic.fact_flights WHERE status != 'cancelled'`)
         const avgDelay = Number(delayRes.toArray()[0].avg_d).toFixed(1)
         
-        const airportsRes = await conn.query(`SELECT COUNT(*) as c FROM 'air_traffic.duckdb'.dim_airport`)
+        const airportsRes = await conn.query(`SELECT COUNT(*) as c FROM air_traffic.dim_airport`)
         const totalAirports = Number(airportsRes.toArray()[0].c)
 
         setStats(prev => ({
@@ -63,7 +66,7 @@ export default function App() {
 
         const topAirports = await conn.query(`
           SELECT airport_icao as icao, CAST(total_flights AS DOUBLE) as flights 
-          FROM 'air_traffic.duckdb'.gold_airport_metrics 
+          FROM air_traffic.gold_airport_metrics 
           ORDER BY total_flights DESC LIMIT 10
         `)
         setAirportData(topAirports.toArray().map((row: any) => ({
@@ -73,7 +76,7 @@ export default function App() {
 
         const airlines = await conn.query(`
           SELECT airline_icao as icao, CAST(on_time_rate * 100 AS DOUBLE) as otp
-          FROM 'air_traffic.duckdb'.gold_airline_rankings
+          FROM air_traffic.gold_airline_rankings
           ORDER BY total_flights DESC LIMIT 10
         `)
         setAirlineData(airlines.toArray().map((row: any) => ({
