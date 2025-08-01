@@ -10,12 +10,8 @@ Polars offers both Eager and Lazy execution. The Lazy API builds a query plan an
 
 ## Example
 ```python
-q = (
-    pl.scan_parquet("data/*.parquet")
-    .filter(pl.col("delay") > 0)
-    .select(["flight_id", "delay"])
-)
-result = q.collect() # Execution happens here
+q = pl.scan_parquet("data/*.parquet").filter(pl.col("delay") > 0).select(["flight_id", "delay"])
+result = q.collect()  # Execution happens here
 ```
 
 ---

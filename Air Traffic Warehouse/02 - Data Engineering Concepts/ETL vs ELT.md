@@ -86,8 +86,7 @@ import polars as pl
 raw = pl.scan_parquet("bronze/flights/*.parquet")
 
 silver = (
-    raw
-    .unique(subset=["flight_id", "date"])
+    raw.unique(subset=["flight_id", "date"])
     .with_columns(
         pl.col("scheduled_departure").str.to_datetime().dt.convert_time_zone("UTC"),
         pl.col("actual_departure").str.to_datetime().dt.convert_time_zone("UTC"),

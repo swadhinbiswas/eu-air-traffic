@@ -46,16 +46,21 @@ def get_connection():
     """Read-only DuckDB connection (cached across reruns)."""
     if settings.duckdb_path.exists():
         return duckdb.connect(str(settings.duckdb_path), read_only=True)
-    
+
     # If no local DB, try pulling from Hugging Face Hub (for Streamlit Cloud)
     import os
+
     try:
         from huggingface_hub import hf_hub_download
+
         repo_id = os.environ.get("HF_REPO", "swadhinbiswas/air-traffic")
-        db_path = hf_hub_download(repo_id=repo_id, repo_type="dataset", filename="air_traffic.duckdb")
+        db_path = hf_hub_download(
+            repo_id=repo_id, repo_type="dataset", filename="air_traffic.duckdb"
+        )
         return duckdb.connect(db_path, read_only=True)
     except Exception as e:  # noqa: BLE001
         import streamlit as st
+
         st.error(f"Failed to connect to Hugging Face Hub: {e}")
         return None
 
@@ -150,13 +155,20 @@ if page == "Overview":
 
         with col_left:
             st.subheader("Flight Status Breakdown")
-            status_data = query_df("SELECT status, COUNT(*) as count FROM fact_flights GROUP BY status")
+            status_data = query_df(
+                "SELECT status, COUNT(*) as count FROM fact_flights GROUP BY status"
+            )
             if status_data is not None and not status_data.is_empty():
                 fig = px.pie(
                     status_data.to_pandas(),
                     values="count",
                     names="status",
-                    color_discrete_map={"scheduled": "#38bdf8", "delayed": "#fbbf24", "cancelled": "#f87171", "landed": "#34d399"},
+                    color_discrete_map={
+                        "scheduled": "#38bdf8",
+                        "delayed": "#fbbf24",
+                        "cancelled": "#f87171",
+                        "landed": "#34d399",
+                    },
                     hole=0.4,
                 )
                 fig.update_layout(height=350, margin={"t": 20, "b": 20, "l": 20, "r": 20})
@@ -195,7 +207,9 @@ if page == "Overview":
                         "Critical (>3 hours)": "#dc2626",
                     },
                 )
-                fig.update_layout(height=350, showlegend=False, xaxis_title="", yaxis_title="Flights")
+                fig.update_layout(
+                    height=350, showlegend=False, xaxis_title="", yaxis_title="Flights"
+                )
                 st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No data available. Run the pipeline to generate flight data.")
@@ -241,16 +255,20 @@ elif page == "Airports":
                 color_continuous_scale="RdYlGn",
                 labels={"on_time_rate": "OTP %"},
             )
-            fig.update_layout(height=450, xaxis_title="Total Flights", yaxis_title="Avg Delay (min)")
+            fig.update_layout(
+                height=450, xaxis_title="Total Flights", yaxis_title="Avg Delay (min)"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Airport Details")
         st.dataframe(
-            data.to_pandas().style.format({
-                "avg_delay_minutes": "{:.1f}",
-                "max_delay_minutes": "{:.0f}",
-                "on_time_rate": "{:.1%}",
-            }),
+            data.to_pandas().style.format(
+                {
+                    "avg_delay_minutes": "{:.1f}",
+                    "max_delay_minutes": "{:.0f}",
+                    "on_time_rate": "{:.1%}",
+                }
+            ),
             use_container_width=True,
         )
     else:
@@ -281,7 +299,9 @@ elif page == "Airlines":
                 color_continuous_scale="RdYlGn",
                 labels={"on_time_rate": "OTP %"},
             )
-            fig.update_layout(height=400, xaxis_title="", yaxis_title="On-Time Rate", yaxis_tickformat=".0%")
+            fig.update_layout(
+                height=400, xaxis_title="", yaxis_title="On-Time Rate", yaxis_tickformat=".0%"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
@@ -298,10 +318,12 @@ elif page == "Airlines":
 
         st.subheader("Airline Rankings")
         st.dataframe(
-            data.to_pandas().style.format({
-                "avg_delay_minutes": "{:.1f}",
-                "on_time_rate": "{:.1%}",
-            }),
+            data.to_pandas().style.format(
+                {
+                    "avg_delay_minutes": "{:.1f}",
+                    "on_time_rate": "{:.1%}",
+                }
+            ),
             use_container_width=True,
         )
     else:
@@ -346,16 +368,20 @@ elif page == "Weather":
                 color_continuous_scale="Viridis",
                 labels={"avg_wind_speed_ms": "Wind (m/s)"},
             )
-            fig.update_layout(height=400, xaxis_title="Avg Temperature (C)", yaxis_title="Avg Delay (min)")
+            fig.update_layout(
+                height=400, xaxis_title="Avg Temperature (C)", yaxis_title="Avg Delay (min)"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Weather Conditions Detail")
         st.dataframe(
-            data.to_pandas().style.format({
-                "avg_delay_minutes": "{:.1f}",
-                "avg_temperature_c": "{:.1f}",
-                "avg_wind_speed_ms": "{:.1f}",
-            }),
+            data.to_pandas().style.format(
+                {
+                    "avg_delay_minutes": "{:.1f}",
+                    "avg_temperature_c": "{:.1f}",
+                    "avg_wind_speed_ms": "{:.1f}",
+                }
+            ),
             use_container_width=True,
         )
     else:
@@ -390,7 +416,12 @@ elif page == "Delays":
                 x="status",
                 y="flight_count",
                 color="status",
-                color_discrete_map={"scheduled": "#38bdf8", "delayed": "#fbbf24", "cancelled": "#f87171", "landed": "#34d399"},
+                color_discrete_map={
+                    "scheduled": "#38bdf8",
+                    "delayed": "#fbbf24",
+                    "cancelled": "#f87171",
+                    "landed": "#34d399",
+                },
             )
             fig.update_layout(height=350, showlegend=False, xaxis_title="", yaxis_title="Flights")
             st.plotly_chart(fig, use_container_width=True)
@@ -398,30 +429,36 @@ elif page == "Delays":
         with col2:
             st.subheader("Delay Statistics by Status")
             st.dataframe(
-                status_data.to_pandas().style.format({
-                    "avg_delay_minutes": "{:.1f}",
-                    "min_delay_minutes": "{:.0f}",
-                    "max_delay_minutes": "{:.0f}",
-                }),
+                status_data.to_pandas().style.format(
+                    {
+                        "avg_delay_minutes": "{:.1f}",
+                        "min_delay_minutes": "{:.0f}",
+                        "max_delay_minutes": "{:.0f}",
+                    }
+                ),
                 use_container_width=True,
             )
 
     if seasonal_data is not None and not seasonal_data.is_empty():
         st.subheader("Daily Flight Volume and Delay Trend")
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=seasonal_data["flight_date"].to_list(),
-            y=seasonal_data["daily_flights"].to_list(),
-            name="Flights",
-            yaxis="y",
-        ))
-        fig.add_trace(go.Scatter(
-            x=seasonal_data["flight_date"].to_list(),
-            y=seasonal_data["avg_delay"].to_list(),
-            name="Avg Delay (min)",
-            yaxis="y2",
-            line={"color": "#f87171", "width": 2},
-        ))
+        fig.add_trace(
+            go.Bar(
+                x=seasonal_data["flight_date"].to_list(),
+                y=seasonal_data["daily_flights"].to_list(),
+                name="Flights",
+                yaxis="y",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=seasonal_data["flight_date"].to_list(),
+                y=seasonal_data["avg_delay"].to_list(),
+                name="Avg Delay (min)",
+                yaxis="y2",
+                line={"color": "#f87171", "width": 2},
+            )
+        )
         fig.update_layout(
             height=400,
             yaxis={"title": "Flights"},
@@ -455,14 +492,16 @@ elif page == "Quality":
         if sources:
             rows = []
             for source, metrics in sources.items():
-                rows.append({
-                    "Source": source,
-                    "Bronze": metrics.get("bronze_rows", 0),
-                    "Silver": metrics.get("silver_rows", 0),
-                    "Quarantined": metrics.get("quarantined_rows", 0),
-                    "Pass Rate": metrics.get("pass_rate"),
-                    "Freshness": metrics.get("freshness", "N/A"),
-                })
+                rows.append(
+                    {
+                        "Source": source,
+                        "Bronze": metrics.get("bronze_rows", 0),
+                        "Silver": metrics.get("silver_rows", 0),
+                        "Quarantined": metrics.get("quarantined_rows", 0),
+                        "Pass Rate": metrics.get("pass_rate"),
+                        "Freshness": metrics.get("freshness", "N/A"),
+                    }
+                )
             df = pd.DataFrame(rows)
 
             fig = px.bar(
@@ -531,13 +570,19 @@ LIMIT 10"""
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("Top Airports"):
-            st.session_state["quick_sql"] = "SELECT * FROM gold_airport_metrics ORDER BY total_flights DESC LIMIT 10"
+            st.session_state["quick_sql"] = (
+                "SELECT * FROM gold_airport_metrics ORDER BY total_flights DESC LIMIT 10"
+            )
     with col2:
         if st.button("Airline Rankings"):
-            st.session_state["quick_sql"] = "SELECT * FROM gold_airline_rankings ORDER BY avg_delay_minutes"
+            st.session_state["quick_sql"] = (
+                "SELECT * FROM gold_airline_rankings ORDER BY avg_delay_minutes"
+            )
     with col3:
         if st.button("Weather Impact"):
-            st.session_state["quick_sql"] = "SELECT * FROM gold_weather_impact ORDER BY flight_count DESC"
+            st.session_state["quick_sql"] = (
+                "SELECT * FROM gold_weather_impact ORDER BY flight_count DESC"
+            )
 
     if "quick_sql" in st.session_state:
         st.code(st.session_state["quick_sql"], language="sql")
@@ -550,11 +595,14 @@ elif page == "Pipeline":
 
     with col1:
         st.subheader("Run Pipeline")
-        st.caption("Execute the full ETL pipeline (collect, bronze, silver, gold, warehouse, quality)")
+        st.caption(
+            "Execute the full ETL pipeline (collect, bronze, silver, gold, warehouse, quality)"
+        )
 
         if st.button("Run Full Pipeline", type="primary"):
             with st.spinner("Running pipeline..."):
                 from pipelines.orchestrator import Orchestrator
+
                 report = Orchestrator().run()
                 st.session_state["last_report"] = report
 
@@ -568,11 +616,13 @@ elif page == "Pipeline":
             st.subheader("Step Timings")
             steps = []
             for name, step in report.steps.items():
-                steps.append({
-                    "Step": name,
-                    "Status": step.get("status", "unknown"),
-                    "Duration (s)": step.get("elapsed_seconds", 0),
-                })
+                steps.append(
+                    {
+                        "Step": name,
+                        "Status": step.get("status", "unknown"),
+                        "Duration (s)": step.get("elapsed_seconds", 0),
+                    }
+                )
             st.dataframe(pd.DataFrame(steps), use_container_width=True)
 
     with col2:

@@ -111,6 +111,7 @@ For route efficiency analysis, we calculate distance between airports:
 ```python
 import math
 
+
 def haversine(lat1, lon1, lat2, lon2):
     """Calculate great-circle distance between two airports in km."""
     R = 6371  # Earth radius in km
@@ -119,11 +120,13 @@ def haversine(lat1, lon1, lat2, lon2):
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
 
-    a = math.sin(delta_phi/2)**2 \
-        + math.cos(phi1) * math.cos(phi2) \
-        * math.sin(delta_lambda/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
 
 # Example: JFK → LHR
 distance = haversine(40.6413, -73.7781, 51.4700, -0.4543)
@@ -144,12 +147,14 @@ import polars as pl
 airport_delays = (
     pl.scan_parquet("silver/flights/*.parquet")
     .group_by("departure_airport")
-    .agg([
-        pl.col("delay_minutes").mean().alias("avg_delay"),
-        pl.col("delay_minutes").quantile(0.95).alias("p95_delay"),
-        pl.len().alias("flight_count"),
-        (pl.col("status") == "C").sum().alias("cancellations"),
-    ])
+    .agg(
+        [
+            pl.col("delay_minutes").mean().alias("avg_delay"),
+            pl.col("delay_minutes").quantile(0.95).alias("p95_delay"),
+            pl.len().alias("flight_count"),
+            (pl.col("status") == "C").sum().alias("cancellations"),
+        ]
+    )
     .sort("avg_delay", descending=True)
     .collect()
 )
@@ -165,9 +170,7 @@ The `airports` ingestion module pulls from OurAirports/OpenFlights:
 ```python
 # Airports ingestion: Filter to relevant airports
 airports_df = pl.read_csv("airports.dat")
-commercial = airports_df.filter(
-    pl.col("type").is_in(["large_airport", "medium_airport"])
-)
+commercial = airports_df.filter(pl.col("type").is_in(["large_airport", "medium_airport"]))
 ```
 
 ## Airport In SCD Tracking

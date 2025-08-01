@@ -148,16 +148,21 @@ airline_id,airline_name,alias,iata,icao,callsign,country,active
 import polars as pl
 
 schema = {
-    "id": pl.Int32, "name": pl.Utf8, "alias": pl.Utf8,
-    "iata": pl.Utf8, "icao": pl.Utf8, "callsign": pl.Utf8,
-    "country": pl.Utf8, "active": pl.Utf8
+    "id": pl.Int32,
+    "name": pl.Utf8,
+    "alias": pl.Utf8,
+    "iata": pl.Utf8,
+    "icao": pl.Utf8,
+    "callsign": pl.Utf8,
+    "country": pl.Utf8,
+    "active": pl.Utf8,
 }
 
 airlines = (
     pl.read_csv("airlines.dat", has_header=False, new_columns=list(schema.keys()))
     .filter(pl.col("active") == "Y")
-    .filter(pl.col("iata") != "")       # Only airlines with IATA code
-    .filter(pl.col("icao") != "")       # Only airlines with ICAO code
+    .filter(pl.col("iata") != "")  # Only airlines with IATA code
+    .filter(pl.col("icao") != "")  # Only airlines with ICAO code
 )
 ```
 

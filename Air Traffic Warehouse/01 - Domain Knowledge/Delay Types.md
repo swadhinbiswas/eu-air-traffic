@@ -229,8 +229,10 @@ GROUP BY
 validation_rules = [
     (pl.col("delay_minutes") >= 0, "Negative delay"),
     (pl.col("delay_minutes") <= 1440, "Delay > 24 hours (unrealistic)"),
-    (pl.col("actual_departure") > pl.col("scheduled_departure"),
-     "Early departure with positive delay — inconsistent"),
+    (
+        pl.col("actual_departure") > pl.col("scheduled_departure"),
+        "Early departure with positive delay — inconsistent",
+    ),
 ]
 ```
 

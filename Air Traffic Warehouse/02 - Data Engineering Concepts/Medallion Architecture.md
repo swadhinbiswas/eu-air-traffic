@@ -58,8 +58,8 @@ bronze/
 def load_to_bronze(raw_data: pl.DataFrame, source: str, ingestion_date: str):
     """Store raw data in Bronze layer. No transformations."""
     path = f"bronze/{source}/{ingestion_date}/ingestion_{ingestion_date}.parquet"
-    raw_data.write_parquet(path)           # As-is, zero processing
-    upload_to_hugging_face(path)           # Persist to HF
+    raw_data.write_parquet(path)  # As-is, zero processing
+    upload_to_hugging_face(path)  # Persist to HF
     log.info(f"Bronze: {source} | {raw_data.height} rows stored at {path}")
 ```
 
@@ -106,25 +106,25 @@ def bronze_to_silver(bronze_path: str, source: str):
         # 1. Deduplicate by business key
         .unique(subset=["flight_id", "date"], keep="last")
         # 2. Normalize timestamps to UTC
-        .with_columns([
-            pl.col("scheduled_departure")
-                .str.to_datetime()
-                .dt.convert_time_zone("UTC"),
-            pl.col("actual_departure")
-                .str.to_datetime()
-                .dt.convert_time_zone("UTC"),
-        ])
+        .with_columns(
+            [
+                pl.col("scheduled_departure").str.to_datetime().dt.convert_time_zone("UTC"),
+                pl.col("actual_departure").str.to_datetime().dt.convert_time_zone("UTC"),
+            ]
+        )
         # 3. Validate business rules
         .filter(
-            (pl.col("delay_minutes") >= 0) &
-            (pl.col("airport_code").str.len_bytes() == 3) &
-            (pl.col("actual_arrival") > pl.col("actual_departure"))
+            (pl.col("delay_minutes") >= 0)
+            & (pl.col("airport_code").str.len_bytes() == 3)
+            & (pl.col("actual_arrival") > pl.col("actual_departure"))
         )
         # 4. Cast types
-        .with_columns([
-            pl.col("delay_minutes").cast(pl.Int32),
-            pl.col("airport_code").str.to_uppercase(),
-        ])
+        .with_columns(
+            [
+                pl.col("delay_minutes").cast(pl.Int32),
+                pl.col("airport_code").str.to_uppercase(),
+            ]
+        )
         .collect()
     )
 
@@ -132,8 +132,10 @@ def bronze_to_silver(bronze_path: str, source: str):
     output_path = f"silver/{source}/{month}/"
     silver.write_parquet(output_path)
 
-    log.info(f"Silver: {source} | {silver.height} clean rows | "
-             f"{raw.collect().height - silver.height} rows discarded")
+    log.info(
+        f"Silver: {source} | {silver.height} clean rows | "
+        f"{raw.collect().height - silver.height} rows discarded"
+    )
 ```
 
 ## Gold Layer — The "Business Zone"
@@ -183,21 +185,27 @@ def silver_to_gold(silver_path: str, airport_dim: pl.DataFrame):
 
     # Generate surrogate keys
     fact_flights = (
-        flights
-        .join(airport_dim_lazy.select(["airport_key", "airport_code"]),
-              left_on="departure_airport", right_on="airport_code",
-              how="left")
-        .with_columns([
-            pl.col("airport_key").alias("departure_airport_key"),
-        ])
+        flights.join(
+            airport_dim_lazy.select(["airport_key", "airport_code"]),
+            left_on="departure_airport",
+            right_on="airport_code",
+            how="left",
+        )
+        .with_columns(
+            [
+                pl.col("airport_key").alias("departure_airport_key"),
+            ]
+        )
         .drop(["airport_code_right", "departure_airport"])
         # Calculate metrics
-        .with_columns([
-            (pl.col("actual_arrival") - pl.col("actual_departure"))
-                .dt.total_minutes().alias("flight_duration_min"),
-            pl.when(pl.col("status") == "C").then(True).otherwise(False)
-                .alias("is_cancelled"),
-        ])
+        .with_columns(
+            [
+                (pl.col("actual_arrival") - pl.col("actual_departure"))
+                .dt.total_minutes()
+                .alias("flight_duration_min"),
+                pl.when(pl.col("status") == "C").then(True).otherwise(False).alias("is_cancelled"),
+            ]
+        )
         .collect()
     )
 

@@ -67,10 +67,10 @@ Weather is the **#1 cause of flight delays globally**, responsible for ~30–40%
 def classify_adverse_weather(row):
     """Return True if weather is likely to cause delays."""
     return (
-        row["visibility_km"] < 3.0 or
-        row["wind_speed_kmh"] > 50 or
-        row["precipitation_mm"] > 5 or
-        row["condition"] in ["Thunderstorm", "Snow", "Fog", "Blizzard"]
+        row["visibility_km"] < 3.0
+        or row["wind_speed_kmh"] > 50
+        or row["precipitation_mm"] > 5
+        or row["condition"] in ["Thunderstorm", "Snow", "Fog", "Blizzard"]
     )
 ```
 
@@ -104,11 +104,10 @@ import requests
 
 url = "https://api.open-meteo.com/v1/forecast"
 params = {
-    "latitude": 40.6413,      # JFK
+    "latitude": 40.6413,  # JFK
     "longitude": -73.7781,
-    "hourly": ["temperature_2m", "relative_humidity_2m",
-               "wind_speed_10m", "visibility"],
-    "timezone": "UTC"
+    "hourly": ["temperature_2m", "relative_humidity_2m", "wind_speed_10m", "visibility"],
+    "timezone": "UTC",
 }
 response = requests.get(url, params=params)
 weather_data = response.json()
@@ -123,16 +122,12 @@ Weather data is typically **hourly**. Flights have specific departure/arrival ti
 
 ```python
 # Polars temporal join: nearest weather for each flight
-flights_with_weather = (
-    flights
-    .sort("scheduled_departure")
-    .join_asof(
-        weather.sort("observation_time"),
-        left_on="scheduled_departure",
-        right_on="observation_time",
-        tolerance="1h",   # within 1 hour
-        strategy="nearest"
-    )
+flights_with_weather = flights.sort("scheduled_departure").join_asof(
+    weather.sort("observation_time"),
+    left_on="scheduled_departure",
+    right_on="observation_time",
+    tolerance="1h",  # within 1 hour
+    strategy="nearest",
 )
 ```
 
@@ -174,11 +169,11 @@ ORDER BY avg_delay DESC;
 # Weather validation rules
 def validate_weather_row(row) -> bool:
     return (
-        -80 <= row["temperature_c"] <= 60 and
-        0 <= row["humidity_pct"] <= 100 and
-        0 <= row["wind_speed_kmh"] <= 300 and
-        0 <= row["visibility_km"] <= 100 and
-        800 <= row["pressure_hpa"] <= 1100
+        -80 <= row["temperature_c"] <= 60
+        and 0 <= row["humidity_pct"] <= 100
+        and 0 <= row["wind_speed_kmh"] <= 300
+        and 0 <= row["visibility_km"] <= 100
+        and 800 <= row["pressure_hpa"] <= 1100
     )
 ```
 
