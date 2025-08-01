@@ -1,68 +1,64 @@
-import { useEffect, useState } from "react"
-import { Plane, Activity, Clock, Database, CheckCircle2, XCircle } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from "recharts"
-import * as duckdb from "@duckdb/duckdb-wasm"
+import { useEffect, useState } from 'react'
+import * as duckdb from '@duckdb/duckdb-wasm'
+import duckdb_wasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url'
+import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url'
+import duckdb_wasm_eh from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url'
+import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from 'recharts'
+import { Plane, Activity, Clock, Database, Map as MapIcon, RefreshCcw } from 'lucide-react'
+import { motion } from 'framer-motion'
+
+const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
+  mvp: {
+    mainModule: duckdb_wasm,
+    mainWorker: mvp_worker,
+  },
+  eh: {
+    mainModule: duckdb_wasm_eh,
+    mainWorker: eh_worker,
+  },
+}
 
 export default function App() {
-  const [stats, setStats] = useState({
-    flights: "--",
-    delay: "--",
-    airports: "--",
-    size: "16.5 MB"
-  })
-  
+  const [_, setDb] = useState<duckdb.AsyncDuckDB | null>(null)
+  const [status, setStatus] = useState("Initializing DuckDB-WASM...")
+  const [stats, setStats] = useState({ flights: "0", delay: "0", airports: "0", otp: "0" })
   const [airportData, setAirportData] = useState<any[]>([])
   const [airlineData, setAirlineData] = useState<any[]>([])
-  const [status, setStatus] = useState("Initializing WebAssembly Engine...")
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
     async function initDuckDB() {
       try {
-        setStatus("Downloading DuckDB-WASM bundles...")
-        const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles()
-        const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES)
-        
-        const worker_url = URL.createObjectURL(
-          new Blob([`importScripts("${bundle.mainWorker}");`], {type: 'text/javascript'})
-        )
-        const worker = new Worker(worker_url)
+        const bundle = await duckdb.selectBundle(MANUAL_BUNDLES)
+        const worker = new Worker(bundle.mainWorker!)
         const logger = new duckdb.ConsoleLogger()
         const db = new duckdb.AsyncDuckDB(logger, worker)
-        
-        setStatus("Instantiating WebAssembly...")
         await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
-        URL.revokeObjectURL(worker_url)
-
-        setStatus("Connecting to Hugging Face Data Lake...")
+        
+        setDb(db)
+        setStatus("Connecting to HF Parquet Lake...")
         
         const conn = await db.connect()
         const HF_BASE = 'https://huggingface.co/datasets/swadhinbiswas/air-traffic/resolve/main'
 
-        // Create views over the remote Parquet files
-        await conn.query(`
-          CREATE OR REPLACE VIEW fact_flights AS 
-          SELECT * FROM read_parquet('${HF_BASE}/flights/data.parquet')
-        `)
+        // Register files explicitly in the VFS to avoid globbing issues
+        await db.registerFileURL('data.parquet', `${HF_BASE}/flights/data.parquet`, duckdb.DuckDBDataProtocol.HTTP, false)
+        await db.registerFileURL('airports.parquet', `${HF_BASE}/airports/airports.parquet`, duckdb.DuckDBDataProtocol.HTTP, false)
+        await db.registerFileURL('airport_metrics.parquet', `${HF_BASE}/airport_metrics/airport_metrics.parquet`, duckdb.DuckDBDataProtocol.HTTP, false)
+        await db.registerFileURL('airline_rankings.parquet', `${HF_BASE}/airline_rankings/airline_rankings.parquet`, duckdb.DuckDBDataProtocol.HTTP, false)
         
-        await conn.query(`
-          CREATE OR REPLACE VIEW dim_airport AS 
-          SELECT * FROM read_parquet('${HF_BASE}/airports/airports.parquet')
-        `)
-        
-        await conn.query(`
-          CREATE OR REPLACE VIEW gold_airport_metrics AS 
-          SELECT * FROM read_parquet('${HF_BASE}/airport_metrics/airport_metrics.parquet')
-        `)
-        
-        await conn.query(`
-          CREATE OR REPLACE VIEW gold_airline_rankings AS 
-          SELECT * FROM read_parquet('${HF_BASE}/airline_rankings/airline_rankings.parquet')
-        `)
+        // Create views using the local VFS references
+        await conn.query(`CREATE OR REPLACE VIEW fact_flights AS SELECT * FROM read_parquet('data.parquet')`)
+        await conn.query(`CREATE OR REPLACE VIEW dim_airport AS SELECT * FROM read_parquet('airports.parquet')`)
+        await conn.query(`CREATE OR REPLACE VIEW gold_airport_metrics AS SELECT * FROM read_parquet('airport_metrics.parquet')`)
+        await conn.query(`CREATE OR REPLACE VIEW gold_airline_rankings AS SELECT * FROM read_parquet('airline_rankings.parquet')`)
 
         setIsConnected(true)
-        setStatus("Connected to HF Parquet Lake (Live)")
+        setStatus("Connected to Data Lake (Live)")
 
         // Queries
         const flightsRes = await conn.query(`SELECT COUNT(*) as total FROM fact_flights`)
@@ -74,12 +70,15 @@ export default function App() {
         const airportsRes = await conn.query(`SELECT COUNT(*) as c FROM dim_airport`)
         const totalAirports = Number(airportsRes.toArray()[0].c)
 
-        setStats(prev => ({
-          ...prev,
+        const optRes = await conn.query(`SELECT AVG(on_time_rate) as otp FROM gold_airline_rankings`)
+        const avgOtp = (Number(optRes.toArray()[0].otp) * 100).toFixed(1)
+
+        setStats({
           flights: totalFlights.toLocaleString(),
           delay: avgDelay,
-          airports: totalAirports.toLocaleString()
-        }))
+          airports: totalAirports.toLocaleString(),
+          otp: avgOtp
+        })
 
         const topAirports = await conn.query(`
           SELECT airport_icao as icao, CAST(total_flights AS DOUBLE) as flights 
@@ -101,9 +100,10 @@ export default function App() {
           otp: Number(row.otp)
         })))
 
-      } catch (err: any) {
-        setStatus("Connection Failed: " + err.message)
-        setIsConnected(false)
+        await conn.close()
+      } catch (err) {
+        console.error(err)
+        setStatus("Error connecting to data lake.")
       }
     }
     
@@ -111,102 +111,123 @@ export default function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-background p-8 font-sans antialiased text-foreground">
-      <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Air Traffic Edge</h1>
-            <p className="text-muted-foreground">European aviation analytics powered by DuckDB-WASM</p>
+    <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-emerald-500/30 pb-20">
+      {/* Top Navigation */}
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-zinc-950/80 backdrop-blur-xl">
+        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-500/20 p-2 rounded-lg">
+              <Plane className="w-5 h-5 text-emerald-500" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-zinc-100">Air Traffic Edge</h1>
           </div>
-          <div className="flex items-center gap-2 bg-secondary px-4 py-2 rounded-full text-sm font-medium">
-            {isConnected ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-rose-500" />}
-            {status}
-          </div>
-        </div>
-
-        {/* KPIs */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Flights</CardTitle>
-              <Plane className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{stats.flights}</div>
-              <p className="text-xs text-muted-foreground mt-1 text-emerald-500 font-medium">Live from Hugging Face</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Avg Delay</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{stats.delay} <span className="text-lg text-muted-foreground">min</span></div>
-              <p className="text-xs text-muted-foreground mt-1 text-rose-500 font-medium">System-wide average</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Airports</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{stats.airports}</div>
-              <p className="text-xs text-muted-foreground mt-1">European coverage</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Data Size</CardTitle>
-              <Database className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{stats.size}</div>
-              <p className="text-xs text-muted-foreground mt-1 text-emerald-500 font-medium">Zero-copy DuckDB cache</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Charts */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="col-span-1">
-            <CardHeader>
-              <CardTitle>Top Airports by Volume</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={airportData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <RechartsTooltip cursor={{fill: 'hsl(var(--muted))'}} contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))' }} />
-                  <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
           
-          <Card className="col-span-1">
-            <CardHeader>
-              <CardTitle>Airline On-Time Performance</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={airlineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} domain={['auto', 100]} />
-                  <RechartsTooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))' }} />
-                  <Line type="monotone" dataKey="otp" stroke="#10b981" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+          <div className="flex items-center gap-4">
+            <Badge variant={isConnected ? "success" : "secondary"} className="gap-1.5 py-1 px-3">
+              {isConnected ? <Activity className="w-3.5 h-3.5" /> : <RefreshCcw className="w-3.5 h-3.5 animate-spin" />}
+              {status}
+            </Badge>
+            <a href="https://github.com/swadhinbiswas/air-traffic" target="_blank" rel="noreferrer" className="text-zinc-400 hover:text-zinc-100 transition-colors">
+              <Database className="w-5 h-5" />
+            </a>
+          </div>
         </div>
-      </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container mx-auto px-6 py-8 space-y-8">
+        
+        {/* KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { title: "Total Flights", value: stats.flights, icon: <Activity className="w-4 h-4 text-emerald-500" /> },
+            { title: "Avg Delay (mins)", value: stats.delay, icon: <Clock className="w-4 h-4 text-amber-500" /> },
+            { title: "On-Time Rate", value: `${stats.otp}%`, icon: <Plane className="w-4 h-4 text-blue-500" /> },
+            { title: "Active Airports", value: stats.airports, icon: <MapIcon className="w-4 h-4 text-purple-500" /> }
+          ].map((kpi, idx) => (
+            <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }}>
+              <Card className="bg-zinc-900/50 border-white/5 backdrop-blur-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <CardTitle className="text-sm font-medium text-zinc-400">{kpi.title}</CardTitle>
+                  {kpi.icon}
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-zinc-100">{kpi.value}</div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Analytics Tabs */}
+        <Tabs defaultValue="overview" className="w-full">
+          <TabsList className="bg-zinc-900/50 border border-white/5">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="airlines">Airlines</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="overview" className="mt-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+              <Card className="bg-zinc-900/50 border-white/5 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="w-5 h-5 text-zinc-400" />
+                    Top Busiest Airports
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="h-[400px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={airportData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                      <XAxis dataKey="name" stroke="#ffffff50" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#ffffff50" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${v/1000}k`} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#ffffff10', borderRadius: '8px' }}
+                        itemStyle={{ color: '#10b981' }}
+                        cursor={{fill: '#ffffff05'}}
+                      />
+                      <Bar dataKey="total" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+
+          <TabsContent value="airlines" className="mt-6">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+              <Card className="bg-zinc-900/50 border-white/5 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Plane className="w-5 h-5 text-zinc-400" />
+                    Airline On-Time Performance (OTP)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="h-[400px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={airlineData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="colorOtp" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                      <XAxis dataKey="name" stroke="#ffffff50" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#ffffff50" fontSize={12} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#ffffff10', borderRadius: '8px' }}
+                        itemStyle={{ color: '#3b82f6' }}
+                      />
+                      <Area type="monotone" dataKey="otp" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorOtp)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+        </Tabs>
+      </main>
     </div>
   )
 }
