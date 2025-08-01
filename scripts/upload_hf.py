@@ -92,12 +92,12 @@ def upload_warehouse() -> dict[str, Any]:
         CommitOperationAdd(path_in_repo=repo_path, path_or_fileobj=str(local_path))
         for local_path, repo_path in uploads
     ]
-    
+
     api.create_commit(
-        repo_id=repo, 
-        repo_type="dataset", 
+        repo_id=repo,
+        repo_type="dataset",
         commit_message="chore: ETL data refresh",
-        operations=operations
+        operations=operations,
     )
     uploaded = len(operations)
 
