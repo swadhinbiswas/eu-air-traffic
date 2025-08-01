@@ -54,7 +54,7 @@ def get_connection():
         repo_id = os.environ.get("HF_REPO", "swadhinbiswas/air-traffic")
         db_path = hf_hub_download(repo_id=repo_id, repo_type="dataset", filename="air_traffic.duckdb")
         return duckdb.connect(db_path, read_only=True)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import streamlit as st
         st.error(f"Failed to connect to Hugging Face Hub: {e}")
         return None

@@ -46,6 +46,7 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "integration: long-running end-to-end tests",

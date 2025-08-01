@@ -35,8 +35,8 @@ def download_warehouse(app_settings: Any = None) -> dict[str, Any]:
     repo = s.huggingface_repo
 
     try:
-        repo_info = api.repo_info(repo_id=repo, repo_type="dataset")
-    except Exception:
+        api.repo_info(repo_id=repo, repo_type="dataset")
+    except Exception:  # noqa: BLE001
         logger.warning("[hf-download] repo %s not found or not accessible", repo)
         return {"skipped": True, "reason": f"repo {repo} not found"}
 
@@ -65,7 +65,7 @@ def download_warehouse(app_settings: Any = None) -> dict[str, Any]:
             downloaded += 1
             logger.debug("[hf-download] downloaded %s", item.path)
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("[hf-download] download failed: %s", exc)
         return {"downloaded": downloaded, "error": str(exc)}
 

@@ -21,7 +21,9 @@ import polars as pl
 from config.logging import logger
 from config.settings import Settings, settings
 
-UTC_NOW = lambda: datetime.now(UTC).isoformat()
+
+def UTC_NOW() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────────

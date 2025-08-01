@@ -1,4 +1,4 @@
-# ✈️ Air Traffic Analytics Platform
+#                      ✈️ Air Traffic Analytics Platform
 
 **A production-style batch data platform for European aviation analytics** — flight delays, weather correlations, airline benchmarking, and operational KPIs. Built on a Medallion architecture with Polars, DuckDB, dbt, FastAPI, and GitHub Actions.
 
