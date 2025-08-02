@@ -392,7 +392,6 @@ A comprehensive documentation vault lives in `Air Traffic Warehouse/` — 56 Obs
 
 This is a portfolio project demonstrating data engineering capabilities. The code is provided as-is for educational and demonstration purposes.
 
-> If you intend to open-source this, consider adding an actual `LICENSE` file (e.g. MIT) so the badge above is backed by a real license grant.
 
 ## Contact
 
