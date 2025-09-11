@@ -16,7 +16,7 @@ const LAYERS = [
   {
     name: "Gold",
     tone: "text-emerald-300 border-emerald-500/20 bg-emerald-500/5",
-    body: "Business-ready marts modelled in dbt (staging → intermediate → marts), tested and documented. Registered as gold_* views in DuckDB and bundled for the dashboard.",
+    body: "Business-ready marts modelled in dbt (staging → intermediate → marts), tested and documented. Registered as gold_* views in MotherDuck and read live by the dashboard — no static export.",
   },
 ];
 

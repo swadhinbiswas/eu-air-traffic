@@ -241,7 +241,13 @@ export function ExplorerPage() {
               </table>
             </Panel>
           ) : (
-            <EmptyState message={`No preview available for ${selected} in the static bundle.`} />
+            <EmptyState
+              message={
+                selected.startsWith("gold_") || selected.startsWith("fact_") || selected === "status_mix"
+                  ? `No rows in ${selected} yet — this mart fills once flight history flows (OpenSky credentials on the collector).`
+                  : `No preview available for ${selected} right now.`
+              }
+            />
           )}
 
           {tableMeta && (

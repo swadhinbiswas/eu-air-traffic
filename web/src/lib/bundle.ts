@@ -303,6 +303,8 @@ export async function loadBundle<T>(file: string): Promise<T> {
         return (await md.fetchOps()) as T;
       case "manifest.json":
         return (await md.fetchManifest()) as T;
+      case "freshness.json":
+        return (await md.fetchFreshness()) as T;
       case "positions.json":
         return (await md.fetchLivePositions()) as T;
       case "metars.json":

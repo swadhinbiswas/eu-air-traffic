@@ -258,6 +258,32 @@ export async function fetchOps(): Promise<Ops> {
   return { stream_health, pipeline, quality };
 }
 
+export interface BatchFreshness {
+  /** Newest batch record across the warehouse, ISO string or null when empty. */
+  asOf: string | null;
+  totalFlights: number;
+  hasFlights: boolean;
+}
+
+/** When the Gold layer was last refreshed + whether flight history exists. */
+export async function fetchFreshness(): Promise<BatchFreshness> {
+  const [asOfFlights, asOfPositions, asOfWeather, totalFlights] = await Promise.all([
+    scalar<string | null>("SELECT MAX(collected_at) FROM main.fact_flights", null),
+    scalar<string | null>("SELECT MAX(collected_at) FROM main.fact_positions", null),
+    scalar<string | null>("SELECT MAX(collected_at) FROM main.weather", null),
+    scalar<number>("SELECT COUNT(*) FROM main.fact_flights", 0),
+  ]);
+  const candidates = [asOfFlights, asOfPositions, asOfWeather].filter(
+    (v): v is string => typeof v === "string" && v.length > 0
+  );
+  candidates.sort();
+  return {
+    asOf: candidates.length ? candidates[candidates.length - 1] : null,
+    totalFlights,
+    hasFlights: totalFlights > 0,
+  };
+}
+
 export async function fetchManifest(): Promise<BundleManifest> {
   const [airportCount, flightCount, positionCount] = await Promise.all([
     scalar<number>("SELECT COUNT(*) FROM main.dim_airport", 0).catch(() => 0),
