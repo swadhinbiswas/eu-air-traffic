@@ -1,0 +1,32 @@
+[Unit]
+Description=EU Air Traffic collector (Kafka event bus + live snapshot API)
+Documentation=https://github.com/swadhinbiswas/air-traffic
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=airtraffic
+Group=airtraffic
+WorkingDirectory=/opt/eu-air-traffic
+EnvironmentFile=/opt/eu-air-traffic/.env
+ExecStart=/opt/eu-air-traffic/.venv/bin/python -m services.collector
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# Logging → journalctl -u eu-collector -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eu-collector
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/eu-air-traffic/warehouse
+
+[Install]
+WantedBy=multi-user.target

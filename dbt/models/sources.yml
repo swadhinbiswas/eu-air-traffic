@@ -1,0 +1,125 @@
+version: 2
+
+sources:
+  - name: raw_warehouse
+    description: "Raw warehouse tables built by the ingestion pipeline"
+    schema: main
+    loader: duckdb
+    loaded_at_field: ingestion_date
+
+    freshness:
+      warn_after: {count: 12, period: hour}
+      error_after: {count: 24, period: hour}
+
+    tables:
+      - name: fact_flights
+        description: "Core flight fact table with all flight records"
+        columns:
+          - name: flight_id
+            description: "Unique flight identifier"
+          - name: departure_icao
+            description: "ICAO code of departure airport"
+          - name: arrival_icao
+            description: "ICAO code of arrival airport"
+          - name: delay_minutes
+            description: "Flight delay in minutes"
+
+      - name: weather
+        description: "Weather observations at airports"
+        columns:
+          - name: station_icao
+            description: "ICAO code of weather station/airport"
+          - name: temperature_c
+            description: "Temperature in Celsius"
+          - name: timestamp
+            description: "Observation timestamp"
+
+      - name: dim_airport
+        description: "Airport dimension with metadata"
+        columns:
+          - name: airport_icao
+            description: "ICAO airport code (primary key)"
+          - name: iata_code
+            description: "IATA airport code"
+          - name: name
+            description: "Airport name"
+
+      - name: dim_airline
+        description: "Airline dimension"
+        columns:
+          - name: airline_icao
+            description: "ICAO airline code (primary key)"
+          - name: airline_name
+            description: "Airline name"
+
+      - name: dim_aircraft
+        description: "Aircraft type dimension"
+        columns:
+          - name: type_icao
+            description: "ICAO aircraft type code (primary key)"
+          - name: manufacturer
+            description: "Aircraft manufacturer"
+          - name: family
+            description: "Aircraft family"
+
+      - name: dim_route
+        description: "Route dimension"
+        columns:
+          - name: origin
+            description: "Origin airport IATA code"
+          - name: destination
+            description: "Destination airport IATA code"
+          - name: airline
+            description: "Airline operating the route"
+
+      - name: fact_emissions
+        description: "Aircraft emissions data by type"
+        columns:
+          - name: aircraft_type
+            description: "Aircraft type code"
+          - name: co2_kg_per_hour
+            description: "CO2 emissions per hour in kg"
+
+      - name: fact_notams
+        description: "NOTAM (Notice to Airmen) records"
+        columns:
+          - name: notam_id
+            description: "NOTAM identifier"
+          - name: icao_location
+            description: "ICAO location code"
+          - name: notam_type
+            description: "Type of NOTAM"
+
+      - name: dim_fuel
+        description: "Daily jet-fuel price series by region"
+        columns:
+          - name: date
+            description: "Price date"
+          - name: region
+            description: "Fuel price region"
+          - name: price_per_litre
+            description: "Price per litre"
+          - name: currency
+            description: "Currency code"
+
+      - name: fact_positions
+        description: "Latest live aircraft position per airframe, classified by operational class"
+        columns:
+          - name: icao24
+            description: "24-bit ICAO transponder address"
+          - name: aircraft_class
+            description: "Operational class: cargo / military / passenger / business / private / helicopter / glider / drone / balloon / ground / other"
+          - name: emitter_class
+            description: "Physical kind from the ADS-B emitter category"
+          - name: operator_name
+            description: "Operator resolved from the ICAO callsign prefix"
+          - name: operator_category
+            description: "Operator category: passenger / cargo / military / government"
+          - name: type_name
+            description: "ICAO DOC 8643 aircraft type name"
+          - name: co2_kg_per_hour
+            description: "Estimated CO2 emission rate in kg per hour"
+          - name: is_cargo
+            description: "True when classified as a freighter"
+          - name: is_military
+            description: "True when classified as military"

@@ -13,7 +13,7 @@ FROM base AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends git build-essential && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./
-COPY apps config ingestion pipelines scripts ./
+COPY apps config ingestion pipelines scripts services ./
 RUN pip install --upgrade pip \
     && pip install uv \
     && uv pip install --system --no-cache .
@@ -30,7 +30,7 @@ COPY --from=builder /app /app
 RUN mkdir -p /app/warehouse && chown -R app:app /app
 
 USER app
-EXPOSE 8000
+EXPOSE 8000 8090
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1

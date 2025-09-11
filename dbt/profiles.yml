@@ -1,13 +1,25 @@
 air_traffic:
-  target: dev
+  # `DBT_TARGET=motherduck` in CI/production, `dev` locally.
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
+    # Local DuckDB — reproducible runs, CI and the Silver→warehouse build.
     dev:
       type: duckdb
-      path: ../warehouse/air_traffic.duckdb
+      path: "{{ env_var('AIR_TRAFFIC_DUCKDB_PATH', '../warehouse/air_traffic.duckdb') }}"
+      schema: main
+      threads: 4
+      settings:
+        enable_object_cache: true
+    # MotherDuck — the Gold serving layer the dashboard reads.
+    motherduck:
+      type: duckdb
+      path: "md:{{ env_var('MOTHERDUCK_DATABASE', 'air_traffic') }}?motherduck_token={{ env_var('MOTHERDUCK_TOKEN', '') }}"
       schema: main
       threads: 4
     ci:
       type: duckdb
-      path: ../warehouse/ci.duckdb
+      path: "../warehouse/ci.duckdb"
       schema: main
       threads: 2
+      settings:
+        enable_object_cache: true

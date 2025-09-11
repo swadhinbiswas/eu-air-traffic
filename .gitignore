@@ -17,6 +17,8 @@ htmlcov/
 *.duckdb
 *.duckdb.wal
 *.duckdb.tmp
+.commandcode
+study
 
 # Environment & secrets
 .env

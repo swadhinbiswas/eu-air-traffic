@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from "path"
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
 
 export default defineConfig({
   plugins: [react()],
@@ -13,9 +13,9 @@ export default defineConfig({
     rollupOptions: {
       onwarn(warning, warn) {
         // Suppress DuckDB/Arrow sourcemap warnings
-        if (warning.message.includes('Sourcemap for') && warning.message.includes('outside its package')) return;
+        if (warning.message.includes("Sourcemap for") && warning.message.includes("outside its package")) return;
         warn(warning);
-      }
-    }
-  }
-})
+      },
+    },
+  },
+});

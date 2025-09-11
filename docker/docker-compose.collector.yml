@@ -1,0 +1,29 @@
+# VPS deployment: runs ONLY the collector (live snapshot API on :8090).
+#
+#   cp .env.example .env   # fill in AIVEN_KAFKA_*, then:
+#   docker compose -f docker/docker-compose.collector.yml up -d --build
+#   curl localhost:8090/live/status
+#
+# Everything else (Kafka drain → Silver → dbt → MotherDuck → Turso) runs in
+# GitHub Actions. No warehouse API, no Superset, no sink on this box.
+services:
+  collector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: eu-air-traffic-collector
+    command: ["python", "-m", "services.collector"]
+    env_file:
+      - path: ../.env
+        required: true
+    ports:
+      - "8090:8090"
+    volumes:
+      - ../warehouse:/app/warehouse
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8090/health')\""]
+      interval: 30s
+      timeout: 5s
+      start-period: 20s
+      retries: 3

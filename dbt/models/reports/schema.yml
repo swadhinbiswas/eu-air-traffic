@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: data_freshness
+    description: "Data freshness monitoring for key tables"
+    columns:
+      - name: table_name
+        description: "Name of the table being monitored"
+        tests:
+          - unique
+          - not_null
+      - name: last_loaded
+        description: "Timestamp of last data load"
+        tests:
+          - not_null
+      - name: freshness_status
+        description: "Freshness status indicator"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['FRESH', 'WARNING', 'STALE']
+
+  - name: quality_trends
+    description: "Daily quality metrics trends"
+    columns:
+      - name: flight_date
+        description: "Date of the metrics"
+        tests:
+          - unique
+          - not_null
+      - name: total_flights
+        description: "Total flights for the day"
+        tests:
+          - not_null
+      - name: on_time_rate
+        description: "On-time performance rate"
+      - name: cancellation_rate
+        description: "Cancellation rate"

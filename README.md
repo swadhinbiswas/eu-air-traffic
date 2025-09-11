@@ -59,34 +59,90 @@ A quick summary of what this project demonstrates, for anyone scanning the repo:
 - **Medallion architecture done properly** — Bronze (raw), Silver (validated/deduplicated), Gold (business-ready marts), plus a dead-letter Quarantine layer and checkpoint watermarks for idempotent, resumable runs.
 - **Modern, fast tooling** — Polars for 10–30x faster-than-Pandas processing, DuckDB as an embedded columnar OLAP engine, dbt-core for modelled, tested, documented transformations.
 - **Real domain knowledge** — EU261/2004 compensation logic, ICAO airport/airline coding, 46 ICAO prefix groups spanning 50 European and neighbouring countries.
-- **Fully automated pipeline** — GitHub Actions runs the ETL on a schedule, builds dbt models, generates a dashboard, and opens an issue automatically on failure.
+- **A real 24/7 live edge** — one VPS collector polls adsb.lol, OpenSky, aviationweather and Open-Meteo, publishes eight Kafka topics, and serves every live layer (planes, routes, speed, weather, fuel, CO₂) from a single `GET /live/snapshot`.
+- **Operational airspace intelligence** — every aircraft is classified as cargo, military, passenger, business, private, helicopter, glider, drone, balloon or ground. Classification is data-driven: **ICAO DOC 8643** type designators (~2,800 types) and the **OpenFlights** operator database (~5,800 airlines) plus the ADS-B emitter category. Each aircraft also carries an estimated CO₂/fuel rate, so the map and analytics show the whole European picture, not just airline traffic.
+- **Fully automated lake + warehouse** — GitHub Actions drains Kafka → Bronze/Silver Parquet on Hugging Face, then runs dbt → Gold on MotherDuck, on a schedule, and opens an issue automatically on failure.
 - **Quality-first engineering** — typed with mypy, linted/formatted with ruff, tested with pytest under a coverage gate, with a dedicated data-quality framework tracking pass rates and quarantine counts per source.
-- **Multiple consumption surfaces** — a FastAPI service with auto-generated OpenAPI docs, an interactive Streamlit dashboard, Superset BI integration, and a self-contained offline HTML dashboard.
-- **Zero-cost by design** — DuckDB, GitHub Actions, and Hugging Face Hub keep the entire stack running without paid infrastructure, while remaining fully reproducible via Docker Compose.
+- **Multiple consumption surfaces** — an interactive Streamlit dashboard, Apache Superset, a self-contained offline HTML dashboard, and the React "God's Eye View" app.
+- **Zero-cost by design** — the VPS runs the collector; Aiven Kafka, Hugging Face Hub and MotherDuck free tiers, plus GitHub Actions, keep the whole platform running without paid infrastructure while remaining reproducible via Docker Compose.
 
 ## Architecture
 
 ![Platform Architecture](images/1.png)
 
-**Pipeline flow:** `collect → bronze → silver → gold → warehouse → quality report → (optional) HF upload`
+**Two planes.** *Live edge:* VPS collector (only always-on process) → Kafka + `GET /live/snapshot`. *Lake:* GitHub Actions every 9 min drains Kafka → Bronze → incremental Silver on Hugging Face. *Warehouse:* Silver → dbt → Gold on MotherDuck. Batch pipeline: `collect → bronze → silver → warehouse → gold (dbt) → quality → HF upload` (orchestrator order, local/CI).
+
+## Live Dashboard — God's Eye View
+
+A production-grade React dashboard (`web/`) inspired by [gods-eye-view](https://github.com/bilawalsidhu/gods-eye-view): a **MapLibre GL globe** (via [mapcn](https://mapcn.dev)) rendering real dark Earth tiles with live ADS-B aircraft as rotated plane silhouettes, clickable airports, route arcs and an Open-Meteo weather layer — plus a full multi-page analytics surface.
+
+| Page | What it shows |
+|------|----------------|
+| **Overview** | God's Eye View — live MapLibre globe: real-time aircraft telemetry (rotated silhouettes, smooth dead-reckoning, emergency highlight), airports, route arcs, METAR flight-category layer, RainViewer radar, day/night terminator, HUD KPIs, search and click-for-details inspector |
+| **Analytics** | Gold-layer marts with a mapcn route-network map + traffic/delay/seasonal charts, **live airspace** analysis (altitude distribution, common types, airlines-from-callsigns, emergencies) and live aviation-weather analytics |
+| **Stories** | Live "right now" insights (busiest operator, common airframe, live altitude mix) plus batch narratives auto-derived from the Gold layer |
+| **Catalog** | Tables, schemas, columns, row counts and the dbt lineage graph (parsed from the model DAG) |
+| **Explorer** | Dataset browser with column metadata, sample records and CSV export |
+| **SQL** | Query workbench — uses the native **DuckDB** backend when the API is reachable, otherwise falls back to in-browser **DuckDB-WASM** over the bundled Gold layer |
+| **Ops** | Pipeline steps, data-quality pass rates per source, quarantine counts and live stream health |
+| **Docs** | Medallion architecture, model catalogue, data sources and business glossary |
+
+**Hybrid data model.** The dashboard fetches its data at runtime — Gold analytics straight from MotherDuck in the browser (read-only token), live aircraft/weather from the VPS snapshot API. There is no build-time data bundle and no warehouse API in the read path.
+
+```bash
+make web-data     # regenerate the static bundle from the DuckDB warehouse
+make web-install  # install frontend dependencies
+make web          # run the dashboard in dev mode (Vite, http://localhost:5173)
+make web-build    # type-check + production build → web/dist
+```
+
+The bundle is produced by `scripts/build_web_bundle.py`, which reads the batch warehouse (local DuckDB built from the Silver layer), the EU airport reference file and the dbt model graph.
+
+### Live data API (VPS collector)
+
+The dashboard needs live aircraft, weather, fuel and emissions, but community ADS-B APIs block browser CORS (and Cloudflare egress). The **VPS collector owns the edge**: one long-lived process polls every upstream, publishes to Kafka, and serves a single CORS-enabled snapshot API.
+
+```
+VPS collector (24/7, systemd) — the only always-on process
+  ├─ adsb.lol / OpenSky  → positions ─┐  (live store every 15s)
+  ├─ OpenSky             → flights    │  (Kafka every 5 min for positions)
+  ├─ aviationweather     → METAR/TAF  ├─▶ Kafka (Aiven, 24h retention)
+  ├─ Open-Meteo          → forecast   │       │
+  ├─ AviationStack       → fuel       └─▶ LiveStore → GET /live/snapshot → dashboard
+  └─ reference           → airports / routes / fleet / emission factors
+                                              │
+GitHub Actions every 9 min ───────────────────┘
+  sink (offset resume) → Bronze → incremental Silver → HF
+  → DuckDB star schema → dbt Gold → MotherDuck
+```
+
+`GET /live/snapshot` returns everything in one payload: positions (with a live CO₂ estimate and operational class), flight movements, METAR/TAF/forecast, fuel and reference data. Build the dashboard with `VITE_LIVE_URL=https://live.example.com`; expose the VPS with Cloudflare Tunnel or Caddy.
+
+**Cadence:** the live map updates every **15s**, but positions are only published to Kafka every **5 minutes** — persisting every tick would be ~17M rows/day and is not needed for analytics. Every other source publishes each cycle. The Actions sink resumes from its committed Kafka offset, so each 9-minute run drains exactly the records accumulated since the prior run; Kafka retention must exceed the schedule gap (the collector pins it to 24h).
+
+Live aircraft are rendered as **real rotated plane silhouettes**, dead-reckoned between polls using ground speed and track so they glide smoothly. Clicking any aircraft shows full telemetry — Mach, IAS/TAS, OAT, wind aloft, squawk, vertical rate — plus registration, type and operator. Emergencies (squawk 7500/7600/7700) are highlighted in red.
 
 ## Data Sources
 
-| Source | What | Coverage | Rate Limit |
-|--------|------|----------|------------|
-| OpenSky Network | Live flight states, arrivals/departures | Global (EU focus) | 10 req/min (anonymous) |
-| OpenWeather Map | Current weather per airport station | Global | 60 req/min |
-| AviationStack | Fuel prices, airline metadata | Global | 100 req/month (free tier) |
-| OpenFlights | Airport database (9,300 airports) | Global | Static CSV |
-| Holiday API | Public holidays by country | EU countries | Unlimited |
+All sourced by the VPS collector (`services/collector.py`), normalised, published to per-product Kafka topics, and persisted to the lake.
+
+| Source | What | Coverage | Auth |
+|--------|------|----------|------|
+| adsb.lol | Live ADS-B telemetry (alt, gs, Mach, OAT, wind, squawk, reg, type) | EU coverage circles | None |
+| OpenSky Network | Flight movements; positions fallback | Global (EU focus) | Optional |
+| aviationweather.gov | METAR (flight category) + TAF | Europe bbox | None |
+| Open-Meteo | Current + 24h hourly forecast per airport | Global | None |
+| AviationStack | Fuel prices | Global | API key |
+| OpenFlights / OurAirports | Airport, route and fleet reference (EU-filtered to 1,658) | Global | Static CSV |
+| ICAO methodology | Aircraft emission factors (CO₂ per type) | — | Derived |
 
 ## Medallion Layers
 
 | Layer | Purpose |
 |-------|---------|
 | **Bronze** | Raw data landed as-is from source APIs. Appended per run, never modified. Stored as JSONL (ingestion) and consolidated Parquet (processing). Checkpoint watermarks prevent re-fetching already-collected windows. |
-| **Silver** | Cleaned, validated, deduplicated. Timestamps normalised to UTC. Bad rows quarantined with reason and timestamp. Natural keys used for idempotent deduplication (e.g. `flight_id`, `station_icao + timestamp`). This is where documented validation rules are enforced. |
-| **Gold** | Business-ready analytical marts computed from Silver. Six pre-aggregated tables covering airport metrics, airline rankings, delay analysis, weather impact, seasonal trends, and fuel prices. Written as compressed Parquet and registered as DuckDB views for zero-copy querying. |
+| **Silver** | Cleansed, validated, deduplicated. Timestamps normalised to UTC. Bad rows quarantined with reason and timestamp. Natural keys used for idempotent deduplication (e.g. `flight_id`, `station_icao + timestamp`). **Incremental**: only Bronze files written since the last successful run are processed (watermark in `checkpoints/silver_watermarks.json`), so a 9-minute cadence stays flat-cost. `python -m pipelines.silver --full` reprocesses everything. |
+| **Gold** | Business-ready analytical marts modelled in **dbt** (staging → intermediate → marts → reports), tested and documented. `dbt build` materialises the 11 marts as views in the `marts` schema; `pipelines.warehouse --register-gold` exposes them as `gold_*` views in `main` and the warehouse is published to **MotherDuck**. |
 | **Quarantine** | Dead-letter queue. Rows failing Silver validation are written to `warehouse/quarantine/<source>/` with a `quarantine_reason` column and `quarantined_at` timestamp. They never block the pipeline — an analyst can inspect them to identify systematic data quality issues. |
 
 ## Data Model
@@ -136,6 +192,8 @@ Flights arriving within **15 minutes** of schedule are classified as on-time —
 
 ## Gold Marts
 
+Built by **dbt** (`make dbt` / `dbt build`), which also runs the schema tests and writes lineage + docs to `dbt/target/`. Every dbt `marts` model is exposed as a `gold_*` view in `main` by `pipelines/warehouse.py --register-gold`, then published to **MotherDuck** by the `Warehouse` workflow.
+
 | Mart | Grain | Key Metrics |
 |------|-------|-------------|
 | `airport_metrics` | Per airport | total_flights, avg_delay, max_delay, on_time_rate |
@@ -144,6 +202,20 @@ Flights arriving within **15 minutes** of schedule are classified as on-time —
 | `weather_impact` | Per weather condition | flight_count, avg_delay, avg_temperature, avg_wind |
 | `seasonal_trends` | Per date + hour | flight_count, avg_delay |
 | `fuel_price_series` | Per date + region | price_per_litre |
+| `route_performance` | Per route | total_flights, avg_delay, on_time_rate, avg_distance_km |
+| `aircraft_utilization` | Per aircraft type | capacity, range_km, routes_served, co2_kg_per_hour |
+| `emissions_analysis` | Per aircraft type | fuel_burn, co2_kg_per_hour, emission_factor |
+| `notam_summary` | Per location + type | notam_count, latest_notam |
+| `sector_analysis` | Per departure airport + date | flight_count, avg_delay, on_time_rate |
+| `aircraft_class_mix` | Per operational class | aircraft, avg_altitude_ft, avg_ground_speed_kt, total_co2_kg_per_hour |
+
+Plus two report models: `data_freshness` and `quality_trends`.
+
+```bash
+make dbt          # dbt build (models + tests) against the warehouse
+make dbt-test     # tests only
+make dbt-docs     # generate + serve the lineage/documentation site
+```
 
 ## Validation Rules
 
@@ -175,11 +247,14 @@ The platform is explicitly scoped to European aviation:
 
 | Decision | Chosen | Alternatives Considered | Rationale |
 |----------|--------|--------------------------|-----------|
+| Live edge | VPS collector (systemd) | Cloudflare Worker, GitHub Actions cron | Community ADS-B APIs block Cloudflare egress; an always-on node gives gap-free 15s positions and one CORS endpoint |
+| Event bus | Aiven Kafka (REST + native) | SQS, Pub/Sub, Redis Streams | Durable replayable log, free tier, decouples the 24/7 collector from the lake writer |
 | OLAP engine | DuckDB | PostgreSQL, Snowflake, BigQuery | Embedded (no server), columnar, reads Parquet natively, portable for reproducible demos |
 | Data processing | Polars | Pandas, PySpark | 10–30x faster than Pandas on multi-core, lazy evaluation, Rust core, clean API. PySpark overkill for single-node |
 | Data lake | Hugging Face Hub | AWS S3, GCS, local filesystem | Free, versioned datasets, no IAM setup, direct Polars/Pandas download API |
 | Orchestration | GitHub Actions | Airflow, Dagster, Prefect | Free, no infrastructure, integrated with repo, sufficient for cron-based batch jobs |
 | Data modelling | dbt-core | Custom SQL scripts | Industry standard, built-in testing, documentation generation, lineage |
+| Serving layer | MotherDuck | Local DuckDB, Postgres | Serverless DuckDB the dashboard/BI can query without shipping a database file |
 | API | FastAPI | Flask, Django | Async, auto-generated OpenAPI docs, Pydantic validation |
 | BI | Apache Superset + self-contained HTML | Metabase, Grafana | SQL-native, Docker-based, integrates with DuckDB. HTML dashboard for offline demos |
 | Language | Python 3.13 | — | Modern typing (3.12+ union syntax), performance improvements, wide ecosystem |
@@ -192,14 +267,22 @@ All configuration lives in environment variables (never committed). See `.env.ex
 |----------|---------|---------|
 | `MOCK_MODE` | `false` | Deterministic synthetic data when API keys are unavailable |
 | `AVIATIONSTACK_API_KEY` | – | AviationStack fuel prices |
-| `OPENWEATHER_API_KEY` | – | Weather conditions per airport |
-| `AIRPORTDB_API_TOKEN` | – | Airport metadata enrichment |
-| `OPENSKY_USERNAME` / `OPENSKY_PASSWORD` | – | OpenSky live flight data |
-| `HF_TOKEN` / `HF_REPO` | – | Hugging Face dataset upload |
+| `OPENSKY_USERNAME` / `OPENSKY_PASSWORD` | – | OpenSky flights + positions fallback |
+| `AIVEN_KAFKA_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` | – | Aiven Kafka broker (the event bus) |
+| `KAFKA_TOPIC_*` | `eu-positions` … | One topic per data product (positions, flights, metar, taf, forecast, fuel, reference, meta) |
+| `LIVE_API_HOST` / `LIVE_API_PORT` | `0.0.0.0` / `8090` | Live snapshot API bind address |
+| `LIVE_API_PUBLIC_URL` | – | Public URL the dashboard is built against |
+| `HF_TOKEN` / `HF_REPO` | – | Hugging Face dataset (Bronze/Silver lake) |
+| `HF_BRONZE_PREFIX` / `HF_SILVER_PREFIX` | `bronze` / `silver` | Lake path prefixes |
+| `MOTHERDUCK_TOKEN` / `MOTHERDUCK_DATABASE` | – / `air_traffic` | Gold serving layer |
+| `MOTHERDUCK_PG_URL` | – | Postgres-wire endpoint for BI/psql (same token as password) |
+| `WAREHOUSE_TARGET` | `local` | Build target: `local` (reproducible) or `motherduck` |
+| `DBT_TARGET` | `dev` | `dev` (local DuckDB) or `motherduck` |
 | `DELAY_THRESHOLD_MINUTES` | `15` | On-time performance threshold |
-| `REQUEST_TIMEOUT_SECONDS` | `15` | HTTP client timeout |
-| `MAX_RETRIES` | `3` | Retry count with exponential backoff |
-| `RATE_LIMIT_DELAY_SECONDS` | `0.25` | Inter-request delay for rate-limited APIs |
+| `VITE_LIVE_URL` | – | VPS live API base URL (build-time) |
+| `VITE_API_URL` | `http://localhost:8000` | FastAPI backend URL for native SQL (build-time) |
+
+See `.env.example` for the complete, commented list (collector cadence, sink batching, storage paths).
 
 ## Quick Start
 
@@ -210,10 +293,31 @@ Requires **Python 3.12+** and [uv](https://docs.astral.sh/uv/).
 ```bash
 make setup
 cp .env.example .env
-make run        # full pipeline (mock mode)
-make api        # start FastAPI on :8000
-make streamlit  # interactive dashboard on :8501
+make run              # batch Medal​lion pipeline (mock mode) → local DuckDB
+make collector-once   # one poll of every VPS source → Kafka (or Bronze if unset)
+make collector        # 24/7 collector + live API on :8090
+make sink             # drain Kafka → Bronze Parquet → Hugging Face
+make api              # FastAPI (warehouse) on :8000
+make streamlit        # interactive dashboard on :8501
+make web-data && make web   # God's Eye View dashboard on :5173
 ```
+
+Then point the dashboard at the live API: `VITE_LIVE_URL=http://localhost:8090 make web-build`.
+
+### Deploy the collector (VPS)
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin airtraffic
+sudo mkdir -p /opt/eu-air-traffic && sudo chown airtraffic: /opt/eu-air-traffic
+# copy the repo + a filled .env, create the venv, then:
+sudo cp deploy/eu-collector.service /etc/systemd/system/
+sudo systemctl enable --now eu-collector
+journalctl -u eu-collector -f
+```
+
+Expose port 8090 with Cloudflare Tunnel or Caddy, set `LIVE_API_PUBLIC_URL`, and rebuild the dashboard with `VITE_LIVE_URL`.
+
+The collector is the **only** process that runs on the VPS. It is I/O-bound (idle CPU), so a 2-core box is plenty; it uses 4 concurrent fetches per source and shuts down cleanly on `SIGTERM` (systemd `TimeoutStopSec=30`). Kafka → Bronze → Silver → Gold all run ephemerally in GitHub Actions.
 
 ### Docker Compose
 
@@ -229,17 +333,34 @@ The `superset-init` container creates the DuckDB connection and an "Air Traffic 
 
 ## API Endpoints
 
+### Live API (VPS collector, port 8090)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Collector liveness + per-section freshness |
+| GET | `/live/snapshot` | **The one call the dashboard needs** — positions, flights, weather, fuel, reference, emissions |
+| GET | `/live/positions` | Live aircraft (optional `limit`) |
+| GET | `/live/flights` | Recent movements |
+| GET | `/live/weather` | METAR + TAF + Open-Meteo forecast |
+| GET | `/live/fuel` | Jet-fuel price series |
+| GET | `/live/emissions` | Live CO₂ rate by aircraft type |
+| GET | `/live/taf?ids=EDDF,EGLL` | TAF for specific stations |
+| GET | `/live/aircraft/{hex}` | Registration/type enrichment for one airframe |
+| GET | `/live/reference/{kind}` | airports, routes, aircraft, emission_factors, holidays |
+
+### Warehouse API (FastAPI, port 8000)
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness probe, storage readiness, credential status |
 | GET | `/sources` | Registered data sources and collector classes |
 | POST | `/ingest/{source}` | Run a single collector |
 | POST | `/ingest` | Run all collectors |
-| POST | `/pipeline/run` | Full ETL pipeline (collect → bronze → silver → gold → warehouse → quality) |
+| POST | `/pipeline/run` | Full ETL pipeline (collect → bronze → silver → warehouse → gold → quality) |
 | GET | `/pipeline/report` | Last pipeline run report (step timings, success/failure) |
 | GET | `/quality/report` | Data-quality report (pass rates, quarantine counts, freshness) |
 | POST | `/quality/check` | Run data-quality scan on demand |
-| GET | `/warehouse/tables` | DuckDB table inventory with row counts |
+| GET | `/warehouse/tables` | DuckDB/MotherDuck table inventory with row counts |
 | POST | `/warehouse/query` | Read-only SQL query against the warehouse |
 | GET | `/kpis` | Headline business KPIs from the Gold layer |
 | GET | `/dashboard` | Self-contained HTML analytics dashboard (offline, no CDN) |
@@ -301,47 +422,62 @@ make verify     # ruff check + ruff format + mypy + pytest (with coverage gate)
 
 **CI** (`.github/workflows/ci.yml`) — runs on PR and push to `main`:
 1. Lint (`ruff check`) + format (`ruff format --check`)
-2. Type check (`mypy`)
+2. Type check (`mypy`, including `services`)
 3. Tests with coverage gate (`pytest --cov-fail-under=50`)
-4. End-to-end pipeline + dbt build + dbt docs generate
+4. End-to-end mock pipeline + dbt build + docs generate, plus the React build
 
-**ETL** (`.github/workflows/etl.yml`) — scheduled every 6 hours:
-1. Full pipeline run (mock or live, depending on secrets)
-2. dbt model build + tests
-3. Dashboard HTML generation
-4. Artifact upload (pipeline report, quality report, warehouse, dashboard)
-5. Failure notification via GitHub issue
+**Lake** (`.github/workflows/lake.yml`) — every 9 minutes:
+1. Drain the Kafka backlog since the last committed offset (≈9-minute window)
+2. Bronze Parquet → incremental Silver transform
+3. Push Silver to the Hugging Face dataset
+4. Build the star schema, `dbt build`, register `gold_*`, publish to MotherDuck
 
-A concurrency guard prevents parallel DuckDB writes (single-writer database).
+**Bundle** (`.github/workflows/bundle.yml`) — hourly:
+1. Build the offline HTML dashboard and the static JSON bundle from Silver
+2. Build the React dashboard and upload the artifacts
+
+A concurrency guard prevents parallel DuckDB/MotherDuck writes. Only the collector runs on the VPS; all batch/transform work is ephemeral GitHub Actions.
 
 ## Repository Structure
 
 ```
 .
-├── Air Traffic Warehouse/            Comprehensive Obsidian-compatible documentation vault
+├── Air Traffic Warehouse/            Obsidian-compatible documentation vault
 ├── config/                   pydantic-settings config + logging
-├── ingestion/
-│   ├── airports/              OpenFlights + AirportDB enrichment + EU filter
-│   ├── flights/                OpenSky flight states
-│   ├── weather/                OpenWeather conditions
-│   ├── holidays/                Holiday calendar
-│   ├── fuel/                     AviationStack fuel prices
-│   ├── base.py                    Collector ABC + CheckpointStore watermarks
-│   ├── registry.py                 Source -> Collector registry
-│   ├── synthetic.py                 Deterministic mock data (EU airports/airlines)
-│   └── utils.py                      Retry, atomic_write_json, rate limiting
+├── services/                  ── LIVE EDGE (runs on the VPS) ──────────────
+│   ├── collector.py            24/7 process: poll → Kafka + live API
+│   ├── live_api.py               FastAPI app serving GET /live/snapshot
+│   ├── live_store.py              Thread-safe latest-data store
+│   ├── sink.py                     Kafka → Bronze Parquet → Hugging Face
+│   ├── sources/                    positions, flights, weather, forecast, fuel, reference
+│   ├── emissions.py                 ICAO CO₂ estimates + live fleet summary
+│   ├── classification.py             ICAO 8643 + OpenFlights aircraft classifier
+│   ├── enrichment.py                 One place to attach class + CO₂ to a position
+│   ├── data/                        Generated reference data (aircraft types, airlines)
+│   ├── hf_lake.py                   Hugging Face dataset helpers
+│   ├── kafka_bus.py                 Aiven Kafka producer
+│   └── bronze.py                    Raw JSONL writer
+├── ingestion/                 Batch collectors (registry, base, synthetic, per-source)
+│   ├── reference.py             Local-first access to committed reference data
 ├── pipelines/
-│   ├── bronze.py               JSONL -> Parquet (1:1, idempotent)
-│   ├── silver.py                 Clean/validate/deduplicate -> quarantine DLQ
-│   ├── gold.py                     6 analytical marts (Polars)
-│   ├── warehouse.py                  DuckDB star schema + gold views
-│   ├── quality.py                      Data-quality pass-rate reporting
+│   ├── bronze.py               JSONL → Parquet (1:1, idempotent)
+│   ├── silver.py                 Clean/validate/deduplicate → quarantine DLQ
+│   ├── warehouse.py                 DuckDB star schema + gold_* view registration
+│   ├── gold.py                       Portable Polars Gold Parquet export
+│   ├── quality.py                     Data-quality pass-rate reporting
 │   └── orchestrator.py                  Sequential DAG + PipelineReport
-├── apps/main.py                FastAPI ingestion + analytics API
+├── apps/main.py                FastAPI warehouse + analytics API
+├── web/                          React + MapLibre "God's Eye View" dashboard
+│   ├── public/data/               Static data bundle (generated)
+│   └── src/                        pages, map layers, hooks, DuckDB-WASM SQL engine
 ├── scripts/
 │   ├── build_dashboard.py       Offline HTML dashboard generator
-│   └── upload_hf.py               Hugging Face dataset upload
-├── dbt/                          dbt-duckdb project (6 models, 15 tests)
+│   ├── build_web_bundle.py        Static JSON bundle for the React dashboard
+│   ├── lake_sync.py                Pull/push Bronze & Silver with Hugging Face
+│   ├── build_reference_data.py      Regenerate ICAO 8643 + OpenFlights reference data
+│   └── publish_motherduck.py        Publish the warehouse to MotherDuck
+├── dbt/                          dbt-duckdb project (staging → intermediate → marts → reports)
+├── deploy/                        systemd unit for the VPS collector
 ├── docker/                        Dockerfile, compose, Superset init
 ├── tests/                          unit + integration tests
 └── warehouse/                       Generated Medallion layers (gitignored)

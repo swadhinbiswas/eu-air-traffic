@@ -1,0 +1,47 @@
+name: Frontend (runtime data)
+
+# The dashboard fetches its data at runtime (warehouse API on MotherDuck + the
+# collector's live feed), so there is no static data bundle to generate. This
+# job only builds and publishes the React app.
+on:
+  schedule:
+    - cron: "30 3 * * *" # nightly rebuild
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+
+concurrency:
+  group: frontend
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install & build
+        working-directory: web
+        env:
+          # Where the deployed site reads data at runtime.
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_LIVE_URL: ${{ vars.VITE_LIVE_URL }}
+        run: npm ci && npm run build
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dashboard
+          path: web/dist
+          if-no-files-found: error

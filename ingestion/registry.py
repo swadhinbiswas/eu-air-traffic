@@ -36,20 +36,39 @@ def create(name: str, app_settings: Any = None) -> Collector:
 
 
 def register_defaults() -> None:
-    """Register all built-in collectors (idempotent)."""
+    """Register all built-in collectors (idempotent).
+
+    On the VPS the always-on :mod:`services.collector` is the source of truth;
+    these batch collectors remain for the GitHub Actions Silver/Gold transforms
+    and local runs.
+    """
     if _REGISTRY:
         return
-    from ingestion.airports.collector import AirportCollector
+
     from ingestion.flights.collector import FlightCollector
+
+    register("flights", FlightCollector)
+
+    # Reference data collectors (always available)
+    from ingestion.airports.collector import AirportCollector
     from ingestion.fuel.collector import FuelCollector
     from ingestion.holidays.collector import HolidayCollector
     from ingestion.weather.collector import WeatherCollector
+    from ingestion.weather.openmeteo import OpenMeteoCollector
+    from ingestion.aircraft.collector import AircraftCollector
+    from ingestion.routes.collector import RouteCollector
+    from ingestion.emissions.collector import EmissionsCollector
+    from ingestion.notams.collector import NotamCollector
 
     register("airports", AirportCollector)
-    register("flights", FlightCollector)
     register("weather", WeatherCollector)
+    register("weather_forecast", OpenMeteoCollector)
     register("holidays", HolidayCollector)
     register("fuel", FuelCollector)
+    register("aircraft", AircraftCollector)
+    register("routes", RouteCollector)
+    register("emissions", EmissionsCollector)
+    register("notams", NotamCollector)
 
 
 register_defaults()

@@ -99,6 +99,12 @@ def _collector(name: str):
 
 
 def _read_only_con() -> duckdb.DuckDBPyConnection:
+    """Connection for read-only analytics — MotherDuck when configured, else local."""
+    if settings.motherduck_enabled:
+        try:
+            return duckdb.connect(settings.serving_connection)
+        except Exception as exc:  # noqa: BLE001 - fall back to the local file
+            logger.warning("[api] MotherDuck connection failed, using local warehouse: %s", exc)
     if not settings.duckdb_path.exists():
         raise HTTPException(
             status_code=503, detail="Warehouse not built yet. Run POST /pipeline/run first."
@@ -228,7 +234,7 @@ async def warehouse_tables() -> dict[str, Any]:
 
 
 @app.post("/warehouse/query")
-async def warehouse_query(payload: QueryRequest) -> dict[str, Any]:
+async def warehouse_query(payload: QueryRequest) -> list[dict[str, Any]]:
     con = _read_only_con()
     try:
         return con.execute(payload.sql).fetch_df().to_dict(orient="records")
@@ -289,6 +295,162 @@ async def dashboard_refresh() -> dict[str, Any]:
 
     path = await _run_in_executor(build_dashboard)
     return {"status": "ok", "path": str(path)}
+
+
+# ── Enhanced analytics endpoints ───────────────────────────────────────────────
+@app.get("/api/v1/aircraft/fleet")
+async def aircraft_fleet() -> list[dict[str, Any]]:
+    """Get aircraft fleet data with utilization metrics."""
+    con = _read_only_con()
+    try:
+        return (
+            con.execute(
+                """
+            SELECT
+                a.type_icao,
+                a.manufacturer,
+                a.family,
+                a.engine,
+                a.capacity,
+                a.range_km,
+                COUNT(DISTINCT r.origin || '-' || r.destination) AS routes_served,
+                MAX(e.co2_kg_per_hour) AS co2_kg_per_hour
+            FROM dim_aircraft a
+            LEFT JOIN dim_route r ON r.equipment = a.type_icao
+            LEFT JOIN fact_emissions e ON e.aircraft_type = a.type_icao
+            GROUP BY a.type_icao, a.manufacturer, a.family, a.engine, a.capacity, a.range_km
+            ORDER BY routes_served DESC
+            """
+            )
+            .fetch_df()
+            .to_dict(orient="records")
+        )
+    finally:
+        con.close()
+
+
+@app.get("/api/v1/routes/network")
+async def routes_network(limit: int = 500) -> list[dict[str, Any]]:
+    """Get route network with performance metrics."""
+    con = _read_only_con()
+    try:
+        return (
+            con.execute(
+                """
+            SELECT
+                r.origin,
+                r.destination,
+                r.airline,
+                r.stops,
+                r.equipment,
+                r.distance_km,
+                COUNT(f.flight_id) as total_flights,
+                AVG(f.delay_minutes) as avg_delay_minutes
+            FROM dim_route r
+            LEFT JOIN fact_flights f ON f.departure_icao = r.origin AND f.arrival_icao = r.destination
+            GROUP BY r.origin, r.destination, r.airline, r.stops, r.equipment, r.distance_km
+            ORDER BY total_flights DESC
+            LIMIT ?
+            """,
+                (limit,),
+            )
+            .fetch_df()
+            .to_dict(orient="records")
+        )
+    finally:
+        con.close()
+
+
+@app.get("/api/v1/emissions/summary")
+async def emissions_summary() -> dict[str, Any]:
+    """Get emissions summary statistics."""
+    con = _read_only_con()
+    try:
+        result = con.execute(
+            """
+            SELECT
+                COUNT(DISTINCT aircraft_type) as aircraft_types_monitored,
+                SUM(co2_kg_per_hour) as total_co2_per_hour,
+                AVG(co2_kg_per_hour) as avg_co2_per_hour,
+                SUM(fuel_burn_liters_per_hour) as total_fuel_burn_per_hour
+            FROM fact_emissions
+            """
+        ).fetchone()
+        columns = [
+            "aircraft_types_monitored",
+            "total_co2_per_hour",
+            "avg_co2_per_hour",
+            "total_fuel_burn_per_hour",
+        ]
+        return dict(zip(columns, result or (), strict=False))
+    finally:
+        con.close()
+
+
+@app.get("/api/v1/delays/current")
+async def delays_current() -> list[dict[str, Any]]:
+    """Get current delay statistics by airport."""
+    con = _read_only_con()
+    try:
+        return (
+            con.execute(
+                """
+            SELECT
+                departure_icao as airport_icao,
+                COUNT(*) as total_flights,
+                AVG(delay_minutes) as avg_delay_minutes,
+                MAX(delay_minutes) as max_delay_minutes,
+                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_flights
+            FROM fact_flights
+            WHERE scheduled_departure > now() - INTERVAL '6 hours'
+            GROUP BY departure_icao
+            ORDER BY avg_delay_minutes DESC
+            """
+            )
+            .fetch_df()
+            .to_dict(orient="records")
+        )
+    finally:
+        con.close()
+
+
+@app.get("/api/v1/sectors/loading")
+async def sectors_loading() -> list[dict[str, Any]]:
+    """Get airspace sector loading (departure airport activity)."""
+    con = _read_only_con()
+    try:
+        return (
+            con.execute(
+                """
+            SELECT
+                departure_icao as sector_code,
+                CAST(scheduled_departure AS DATE) as date,
+                COUNT(*) as flight_count,
+                AVG(delay_minutes) as avg_delay_minutes
+            FROM fact_flights
+            WHERE scheduled_departure IS NOT NULL
+            GROUP BY departure_icao, CAST(scheduled_departure AS DATE)
+            ORDER BY date DESC, flight_count DESC
+            LIMIT 100
+            """
+            )
+            .fetch_df()
+            .to_dict(orient="records")
+        )
+    finally:
+        con.close()
+
+
+@app.get("/api/v1/dbt/manifest")
+async def dbt_manifest() -> dict[str, Any]:
+    """Get dbt manifest information for lineage and documentation."""
+    manifest_path = settings.dbt_project_dir / "target" / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="dbt manifest not found. Run 'dbt compile' to generate it.",
+        )
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

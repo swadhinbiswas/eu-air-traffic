@@ -75,3 +75,69 @@ def test_as_utc_handles_naive_and_aware():
     parsed = result["utc"].dt.replace_time_zone("UTC").to_list()
     assert all(v is not None for v in parsed)
     assert parsed[0] == parsed[1]
+
+
+def test_silver_incremental_only_processes_new_bronze(tmp_path):
+    """A second run with no new Bronze must do nothing; a new file is picked up."""
+    from config.settings import Settings
+    from pipelines import silver
+
+    warehouse = tmp_path / "warehouse"
+    s = Settings(
+        environment="test",
+        mock_mode=True,
+        motherduck_token=None,
+        warehouse_dir=warehouse,
+        bronze_dir=warehouse / "bronze",
+        silver_dir=warehouse / "silver",
+        quarantine_dir=warehouse / "quarantine",
+        checkpoint_dir=warehouse / "checkpoints",
+        duckdb_path=warehouse / "a.duckdb",
+        rate_limit_delay_seconds=0.0,
+    )
+    s.ensure_directories()
+    bdir = s.bronze_dir / "parquet" / "positions"
+    bdir.mkdir(parents=True)
+
+    pl.DataFrame(
+        [
+            {
+                "icao24": "AAA",
+                "callsign": "DLH1",
+                "aircraft_type": "A320",
+                "latitude": 50.0,
+                "longitude": 8.0,
+            }
+        ]
+    ).write_parquet(bdir / "positions_1.parquet")
+    pl.DataFrame(
+        [
+            {
+                "icao24": "BBB",
+                "callsign": "FDX9",
+                "aircraft_type": "B77F",
+                "latitude": 51.0,
+                "longitude": 9.0,
+            }
+        ]
+    ).write_parquet(bdir / "positions_2.parquet")
+
+    assert silver.run("positions", s) == 2
+    # Nothing new → nothing processed.
+    assert silver.run("positions", s) == 0
+    # One new file → exactly one row processed.
+    pl.DataFrame(
+        [
+            {
+                "icao24": "CCC",
+                "callsign": "RCH1",
+                "aircraft_type": "C17",
+                "latitude": 52.0,
+                "longitude": 10.0,
+            }
+        ]
+    ).write_parquet(bdir / "positions_3.parquet")
+    assert silver.run("positions", s) == 1
+
+    out = pl.read_parquet(s.silver_dir / "positions" / "data.parquet")
+    assert sorted(out["aircraft_class"].to_list()) == ["cargo", "military", "passenger"]

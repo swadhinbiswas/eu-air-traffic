@@ -25,6 +25,7 @@ dependencies = [
     "streamlit>=1.40.0",
     "plotly>=5.24.0",
     "huggingface_hub>=0.23.0",
+    "aiohttp>=3.9",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,10 @@ dev = [
     "dbt-duckdb>=1.8.0",
     "httpx>=0.27.0",
 ]
+# VPS collector service: Kafka event bus + live relay.
+stream = [
+    "kafka-python-ng>=2.2.0",
+]
 
 [project.scripts]
 air-traffic-orchestrate = "pipelines.orchestrator:main"
@@ -58,11 +63,11 @@ asyncio_mode = "auto"
 markers = [
     "integration: long-running end-to-end tests",
 ]
-addopts = "--cov=apps --cov=config --cov=ingestion --cov=pipelines --cov=scripts --cov-report=term-missing:skip-covered"
+addopts = "--cov=apps --cov=config --cov=ingestion --cov=pipelines --cov=scripts --cov=services --cov-report=term-missing:skip-covered"
 
 [tool.coverage.run]
 branch = true
-source = ["apps", "config", "ingestion", "pipelines", "scripts"]
+source = ["apps", "config", "ingestion", "pipelines", "scripts", "services"]
 omit = ["*/__init__.py", "*/tests/*"]
 
 [tool.coverage.report]
@@ -79,4 +84,4 @@ package = true
 opensky-api = { git = "https://github.com/openskynetwork/opensky-api.git", subdirectory = "python" }
 
 [tool.setuptools.packages.find]
-include = ["apps*", "config*", "ingestion*", "pipelines*", "scripts*"]
+include = ["apps*", "config*", "ingestion*", "pipelines*", "scripts*", "services*"]

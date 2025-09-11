@@ -1,5 +1,5 @@
 name: 'air_traffic'
-version: '1.0.0'
+version: '2.0.0'
 config-version: 2
 
 profile: 'air_traffic'
@@ -16,11 +16,32 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+vars:
+  delay_threshold_minutes: 15
+  on_time_threshold_minutes: 15
+
 models:
   air_traffic:
-    marts:
-      +materialized: view
-      +schema: marts
     staging:
       +materialized: view
       +schema: staging
+      +tags: ['staging']
+      +docs:
+        node_color: '#4287f5'
+    intermediate:
+      +materialized: ephemeral
+      +tags: ['intermediate']
+      +docs:
+        node_color: '#f5a742'
+    marts:
+      +materialized: view
+      +schema: marts
+      +tags: ['marts']
+      +docs:
+        node_color: '#42f58d'
+    reports:
+      +materialized: view
+      +schema: reports
+      +tags: ['reports']
+      +docs:
+        node_color: '#f54242'

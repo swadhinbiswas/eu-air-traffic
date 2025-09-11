@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
+    "@motherduck/wasm-client": "^1.5.5-r.1",
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-tabs": "^1.1.21",
@@ -18,13 +19,16 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.43.0",
     "lucide-react": "^1.28.0",
+    "maplibre-gl": "^6.9.0",
     "react": "^19.2.8",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.8",
+    "react-router-dom": "^7.0.0",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -34,14 +38,6 @@
     "postcss": "^8.5.25",
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
-  },
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
+    "vite": "^8.3.0"
   }
 }

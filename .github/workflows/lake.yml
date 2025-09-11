@@ -1,0 +1,103 @@
+name: Lake (Kafka → Silver → Gold)
+
+# The VPS collector publishes to Kafka 24/7. Every 9 minutes this job drains the
+# records accumulated since the previous run (Kafka consumer offset, not a query
+# time-window), builds Silver, then dbt Gold → MotherDuck.
+on:
+  schedule:
+    - cron: "*/9 * * * *" # every 9 minutes
+  workflow_dispatch:
+
+concurrency:
+  group: lake
+  cancel-in-progress: false # never overlap: one consumer group, one DuckDB writer
+
+jobs:
+  lake:
+    name: Drain Kafka → Bronze → Silver → Gold
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AIVEN_KAFKA_HOST: ${{ secrets.AIVEN_KAFKA_HOST }}
+      AIVEN_KAFKA_PORT: ${{ secrets.AIVEN_KAFKA_PORT }}
+      AIVEN_KAFKA_USERNAME: ${{ secrets.AIVEN_KAFKA_USERNAME }}
+      AIVEN_KAFKA_PASSWORD: ${{ secrets.AIVEN_KAFKA_PASSWORD }}
+      AIVEN_KAFKA_CA_CERT: ${{ secrets.AIVEN_KAFKA_CA_CERT }}
+      KAFKA_SECURITY_PROTOCOL: ${{ vars.KAFKA_SECURITY_PROTOCOL || 'SASL_SSL' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_REPO: ${{ secrets.HF_REPO }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      MOTHERDUCK_DATABASE: ${{ vars.MOTHERDUCK_DATABASE || 'my_db' }}
+      WAREHOUSE_TARGET: local
+      DBT_TARGET: dev
+      # Follow the log for at most 7 minutes; the next job starts at 9.
+      LAKE_WINDOW_SECONDS: "420"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra stream
+
+      - name: Pull existing Silver from Hugging Face
+        # Incremental Silver appends to the previous layer, so it must be present.
+        run: uv run python -m scripts.lake_sync pull-silver
+        continue-on-error: true
+
+      - name: Sink Kafka → Bronze Parquet
+        run: uv run python -m services.sink --window-seconds 420
+        continue-on-error: true
+
+      - name: Silver transform (incremental)
+        run: uv run python -m pipelines.silver
+
+      - name: Publish Silver to Hugging Face
+        run: uv run python -m scripts.lake_sync push-silver
+
+      - name: Build DuckDB star schema
+        run: uv run python -m pipelines.warehouse
+
+      - name: dbt build (Gold models + tests)
+        run: uv run dbt build --project-dir dbt --profiles-dir dbt
+
+      - name: Register gold_* views
+        run: uv run python -m pipelines.warehouse --register-gold
+
+      - name: Publish Gold to MotherDuck
+        run: uv run python -m scripts.publish_motherduck
+        continue-on-error: true
+
+      - name: Publish site tables (stories, ops, lineage) to MotherDuck
+        run: uv run python -m scripts.publish_site_tables
+        continue-on-error: true
+
+      - name: Upload quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lake-quality-report
+          path: warehouse/checkpoints/quality_report.json
+          if-no-files-found: ignore
+
+  notify-on-failure:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: lake
+    if: failure()
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Lake pipeline failed — ${new Date().toISOString()}`,
+              body: `The Kafka → Silver → Gold job failed. See the workflow run.`,
+            });
