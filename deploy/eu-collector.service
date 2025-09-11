@@ -10,6 +10,10 @@ User=airtraffic
 Group=airtraffic
 WorkingDirectory=/opt/eu-air-traffic
 EnvironmentFile=/opt/eu-air-traffic/.env
+# warehouse/ is gitignored so a fresh clone lacks it — but ReadWritePaths
+# below requires it to exist. Create it as root before dropping privileges.
+ExecStartPre=+/usr/bin/mkdir -p /opt/eu-air-traffic/warehouse
+ExecStartPre=+/usr/bin/chown airtraffic:airtraffic /opt/eu-air-traffic/warehouse
 ExecStart=/opt/eu-air-traffic/.venv/bin/python -m services.collector
 Restart=always
 RestartSec=5
