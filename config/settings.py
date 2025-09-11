@@ -63,15 +63,14 @@ class Settings(BaseSettings):
     )
     kafka_sasl_mechanism: str = Field(default="PLAIN")
 
-    # Topic per data product. One collector, many topics.
+    # One topic per data product. The three weather streams share a single
+    # topic (split downstream by the record ``_kind``) so the whole platform
+    # fits in 5 topics on small Kafka plans.
     kafka_topic_positions: str = Field(default="eu-positions")
     kafka_topic_flights: str = Field(default="eu-flights")
-    kafka_topic_metar: str = Field(default="eu-metar")
-    kafka_topic_taf: str = Field(default="eu-taf")
-    kafka_topic_forecast: str = Field(default="eu-forecast")
+    kafka_topic_weather: str = Field(default="eu-weather")
     kafka_topic_fuel: str = Field(default="eu-fuel")
     kafka_topic_reference: str = Field(default="eu-reference")
-    kafka_topic_meta: str = Field(default="eu-collect-meta")
 
     # ── Kafka sink (Kafka → Bronze Parquet → Hugging Face) ───────────────
     sink_consumer_group: str = Field(default="eu-air-traffic-sink")
@@ -298,17 +297,27 @@ class Settings(BaseSettings):
 
     @property
     def kafka_topics(self) -> dict[str, str]:
-        """All data-product topics keyed by their logical source name."""
+        """All Kafka topics, keyed by topic role."""
         return {
             "positions": self.kafka_topic_positions,
             "flights": self.kafka_topic_flights,
-            "metar": self.kafka_topic_metar,
-            "taf": self.kafka_topic_taf,
-            "forecast": self.kafka_topic_forecast,
+            "weather": self.kafka_topic_weather,
             "fuel": self.kafka_topic_fuel,
             "reference": self.kafka_topic_reference,
-            "meta": self.kafka_topic_meta,
         }
+
+    def topic_for_source(self, name: str) -> str:
+        """Resolve a collector source name to its Kafka topic.
+
+        The weather sources share one topic; records carry ``_kind`` so the
+        sink can split them back into datasets.
+        """
+        if name in ("metar", "taf", "forecast"):
+            return self.kafka_topic_weather
+        topics = self.kafka_topics
+        if name in topics:
+            return topics[name]
+        raise KeyError(f"Unknown source for Kafka routing: {name!r}")
 
     @property
     def live_api_enabled(self) -> bool:

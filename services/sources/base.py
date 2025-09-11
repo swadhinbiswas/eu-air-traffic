@@ -30,7 +30,7 @@ class Source(ABC):
     @property
     def topic(self) -> str:
         """Kafka topic this source publishes to."""
-        return self.settings.kafka_topics.get(self.name, self.settings.kafka_topic_meta)
+        return self.settings.topic_for_source(self.name)
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"<{type(self).__name__} name={self.name!r} topic={self.topic!r}>"

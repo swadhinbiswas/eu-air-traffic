@@ -95,6 +95,7 @@ class MetarSource(_AviationWeatherSource):
                     vis_m = None
             out.append(
                 {
+                    "_kind": "metar",
                     "station_icao": m["icaoId"],
                     "timestamp": observed,
                     "temperature_c": m.get("temp"),
@@ -134,6 +135,7 @@ class TafSource(_AviationWeatherSource):
         collected_at = datetime.now(UTC).isoformat()
         return [
             {
+                "_kind": "taf",
                 "station_icao": t.get("icaoId"),
                 "issue_time": t.get("issueTime"),
                 "valid_from": t.get("validTimeFrom"),
