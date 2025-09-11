@@ -131,6 +131,7 @@ export function AnalyticsPage() {
 
     const speeds = ac.map((a) => a.gsKt ?? 0).filter((s) => s > 0);
     const totalCo2 = ac.reduce((sum, a) => sum + (a.co2KgPerHour ?? 0), 0);
+    const measuredCo2 = ac.reduce((sum, a) => sum + (!a.co2Estimated ? (a.co2KgPerHour ?? 0) : 0), 0);
     const emergencies = ac
       .filter(isEmergency)
       .slice(0, 8)
@@ -148,6 +149,7 @@ export function AnalyticsPage() {
       cargo: ac.filter((a) => a.aircraftClass === "cargo").length,
       helicopters: ac.filter((a) => a.aircraftClass === "helicopter").length,
       totalCo2,
+      measuredCo2,
       bands,
       types,
       airlines,
@@ -424,11 +426,11 @@ export function AnalyticsPage() {
               <BarSeries data={liveAirspace.airlines} x="airline" y="count" color="#a78bfa" />
             </Panel>
             <Panel>
-              <PanelTitle icon={<Gauge className="h-3.5 w-3.5" />} title="Live carbon intensity" hint="estimated CO₂ from airborne fleet" />
+              <PanelTitle icon={<Gauge className="h-3.5 w-3.5" />} title="Live carbon intensity" hint="measured vs A320-fallback estimate" />
               <div className="grid grid-cols-3 gap-3 py-2">
-                <StatCard label="CO₂ / hour" value={`${nf(liveAirspace.totalCo2, 0)} kg`} tone="amber" />
-                <StatCard label="Tonnes / hour" value={`${nf(liveAirspace.totalCo2 / 1000, 2)} t`} tone="red" />
-                <StatCard label="Avg / aircraft" value={`${nf(liveAirspace.totalCo2 / Math.max(1, liveAirspace.total), 0)} kg/h`} tone="cyan" />
+                <StatCard label="Measured CO₂ / h" value={`${nf(liveAirspace.measuredCo2, 0)} kg`} tone="emerald" />
+                <StatCard label="Estimated CO₂ / h" value={`${nf(liveAirspace.totalCo2 - liveAirspace.measuredCo2, 0)} kg`} tone="amber" />
+                <StatCard label="Tonnes / hour (all)" value={`${nf(liveAirspace.totalCo2 / 1000, 2)} t`} tone="red" />
               </div>
             </Panel>
             <Panel>

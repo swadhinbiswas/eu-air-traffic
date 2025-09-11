@@ -34,6 +34,7 @@ export interface Aircraft {
   manufacturer: string | null;
   wakeCategory: string | null;
   co2KgPerHour: number | null;
+  co2Estimated: boolean;
   fuelBurnKgPerHour: number | null;
   source: string;
   seen: number | null;
@@ -97,6 +98,7 @@ export function fromLive(l: LiveAircraft): Aircraft {
     manufacturer: null,
     wakeCategory: null,
     co2KgPerHour: null,
+    co2Estimated: true,
     fuelBurnKgPerHour: null,
     source: l.mlat ? "mlat" : "adsb",
     seen: l.seen,
@@ -138,6 +140,7 @@ export function fromSnapshot(p: Position): Aircraft {
     manufacturer: null,
     wakeCategory: null,
     co2KgPerHour: null,
+    co2Estimated: true,
     fuelBurnKgPerHour: null,
     source: p.source ?? "snapshot",
     seen: null,
@@ -183,6 +186,7 @@ export function fromApi(row: Record<string, unknown>): Aircraft {
     manufacturer: null,
     wakeCategory: null,
     co2KgPerHour: null,
+    co2Estimated: true,
     fuelBurnKgPerHour: null,
     source: String(row.source ?? "api"),
     seen: null,
@@ -226,6 +230,7 @@ export function fromCanonical(c: CanonicalAircraft): Aircraft {
     manufacturer: c.manufacturer ?? null,
     wakeCategory: c.wake_category ?? null,
     co2KgPerHour: num(c.co2_kg_per_hour),
+    co2Estimated: c.co2_estimated ?? true,
     fuelBurnKgPerHour: num(c.fuel_burn_kg_per_hour),
     source: c.source ?? "adsb",
     seen: null,

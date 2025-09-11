@@ -196,3 +196,133 @@ def test_collector_publishes_positions_on_a_slower_cadence(monkeypatch) -> None:
     assert svc.poll_once(svc.sources[0]) == 1
     assert svc.poll_once(svc.sources[0]) == 0
     assert svc.store.snapshot()["counts"]["positions"] == 1
+
+
+def test_ground_vehicle_emissions_are_zero() -> None:
+    from services.emissions import enrich_emissions
+
+    for pseudo in ("GND", "TWR", "gnd"):
+        row = enrich_emissions({"icao24": "X", "aircraft_type": pseudo})
+        assert row["co2_kg_per_hour"] == 0.0
+        assert row["fuel_burn_kg_per_hour"] == 0.0
+        assert row["co2_estimated"] is False
+
+
+def test_unknown_type_is_flagged_estimated() -> None:
+    from services.emissions import enrich_emissions
+
+    row = enrich_emissions({"icao24": "Y", "aircraft_type": "ZZZ9"})
+    assert row["co2_kg_per_hour"] == 5040.0  # A320 fallback
+    assert row["co2_estimated"] is True
+    known = enrich_emissions({"icao24": "Z", "aircraft_type": "A320"})
+    assert known["co2_estimated"] is False
+
+
+def test_emissions_summary_splits_measured_and_estimated() -> None:
+    store = LiveStore()
+    store.update(
+        "positions",
+        [
+            {
+                "icao24": "a1",
+                "aircraft_type": "A320",
+                "latitude": 50.0,
+                "longitude": 8.0,
+                "collected_at": _now(),
+            },
+            {
+                "icao24": "b2",
+                "aircraft_type": None,
+                "latitude": 51.0,
+                "longitude": 9.0,
+                "collected_at": _now(),
+            },
+            {
+                "icao24": "c3",
+                "aircraft_type": "GND",
+                "latitude": 52.0,
+                "longitude": 10.0,
+                "collected_at": _now(),
+            },
+        ],
+        "icao24",
+    )
+    summary = store.snapshot()["emissions"]
+    assert summary["measured_aircraft"] == 2  # A320 + confident-zero GND
+    assert summary["estimated_aircraft"] == 1  # only the unknown type
+    assert summary["measured_co2_kg_per_hour"] == 5040.0
+    assert summary["estimated_co2_kg_per_hour"] == 5040.0
+    assert summary["total_co2_kg_per_hour"] == 10080.0
+
+
+class _FakeResponse:
+    def __init__(self, status=200, payload=None, headers=None):
+        self.status_code = status
+        self._payload = payload if payload is not None else {"ac": []}
+        self.headers = headers or {}
+
+    def json(self):
+        return self._payload
+
+
+class _FakeSession:
+    """adsb.lol fails on every circle; OpenSky returns one row."""
+
+    def __init__(self, circle_status=500):
+        self.circle_status = circle_status
+        self.get_calls = 0
+
+    def get(self, url, headers=None, timeout=None, params=None, auth=None):
+        self.get_calls += 1
+        if "adsb.lol" in url:
+            return _FakeResponse(status=self.circle_status)
+        return _FakeResponse(
+            payload={
+                "states": [
+                    [
+                        "abc999",
+                        "DLH1",
+                        None,
+                        None,
+                        1,
+                        8.0,
+                        50.0,
+                        9000,
+                        False,
+                        200,
+                        90,
+                        0,
+                        None,
+                        None,
+                        "1000",
+                        None,
+                        None,
+                    ],
+                ]
+            }
+        )
+
+
+def test_positions_merge_opensky_on_partial_adsb_failure() -> None:
+    from services.sources.positions import PositionsSource
+
+    session = _FakeSession(circle_status=500)
+    src = PositionsSource(session=session)
+    rows = src.fetch()
+    assert len(rows) == 1
+    assert rows[0]["icao24"] == "ABC999"
+    assert rows[0]["source"] == "opensky"
+
+
+def test_positions_429_parks_circle_in_cooldown() -> None:
+    from services.sources.positions import PositionsSource
+
+    session = _FakeSession(circle_status=429)
+    src = PositionsSource(session=session)
+    assert len(src.fetch()) == 1  # opensky fill on first degraded tick
+    first_calls = session.get_calls
+    assert first_calls > 10  # 10 circles + opensky
+    assert len(src._cooldown_until) == 10
+    session.get_calls = 0
+    assert len(src.fetch()) == 1  # circles skipped, opensky only
+    assert session.get_calls == 1

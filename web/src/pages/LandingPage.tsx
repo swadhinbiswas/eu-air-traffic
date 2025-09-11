@@ -177,7 +177,9 @@ function AircraftInfo({ plane, onClose }: { plane: Aircraft; onClose: () => void
         </Row>
         {plane.wakeCategory ? <Row label="Wake cat.">{plane.wakeCategory}</Row> : null}
         <Row label="CO₂ rate">
-          {plane.co2KgPerHour !== null ? `${nf(plane.co2KgPerHour, 0)} kg/h` : "—"}
+          {plane.co2KgPerHour !== null
+            ? `${plane.co2Estimated ? "~" : ""}${nf(plane.co2KgPerHour, 0)} kg/h${plane.co2Estimated ? " (est.)" : ""}`
+            : "—"}
         </Row>
         <Row label="Fuel burn">
           {plane.fuelBurnKgPerHour !== null ? `${nf(plane.fuelBurnKgPerHour, 0)} kg/h` : "—"}

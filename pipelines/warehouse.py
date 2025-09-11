@@ -329,6 +329,7 @@ class WarehouseBuilder:
                 "emergency",
                 "co2_kg_per_hour",
                 "fuel_burn_kg_per_hour",
+                "co2_estimated",
                 "source",
                 "collected_at",
             )

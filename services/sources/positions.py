@@ -8,6 +8,7 @@ persists.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -130,39 +131,71 @@ class PositionsSource(Source):
     def __init__(self, app_settings=None, session: requests.Session | None = None) -> None:
         super().__init__(app_settings)
         self._session = session or requests.Session()
+        # Circles cooling down after a 429, mapped to a monotonic timestamp.
+        self._cooldown_until: dict[tuple[float, float, int], float] = {}
 
-    def _fetch_adsb(self) -> dict[str, dict[str, Any]]:
+    @staticmethod
+    def _retry_after_seconds(res: requests.Response) -> float:
+        try:
+            return max(float(res.headers.get("Retry-After", "")), 30.0)
+        except (TypeError, ValueError):
+            return 120.0
+
+    def _fetch_adsb(self) -> tuple[dict[str, dict[str, Any]], int]:
         """Fetch all coverage circles concurrently and dedupe by ICAO24.
 
         Serial requests took 10 round-trips every tick; parallelising keeps the
         15s cadence comfortably within the free-tier budget.
+
+        Returns ``(rows by icao24, failed circle count)``. A 429 parks that
+        circle in cooldown instead of hammering the rate limiter every tick.
         """
+
         from concurrent.futures import ThreadPoolExecutor
 
         by_hex: dict[str, dict[str, Any]] = {}
 
-        def fetch_center(center: tuple[float, float, int]) -> list[dict[str, Any]]:
+        def fetch_center(center: tuple[float, float, int]) -> tuple[list[dict[str, Any]], bool]:
             lat, lon, dist = center
+            if time.monotonic() < self._cooldown_until.get(center, 0.0):
+                return [], True
             try:
                 res = self._session.get(
                     f"{ADSB_LOL}/lat/{lat:.2f}/lon/{lon:.2f}/dist/{dist}",
                     headers=HEADERS,
                     timeout=self.settings.request_timeout_seconds,
                 )
-                if res.status_code != 200:
-                    return []
-                rows = [normalise_adsb(ac) for ac in res.json().get("ac", [])]
-                return [row for row in rows if row]
             except (requests.RequestException, ValueError) as exc:
-                logger.debug("[positions] adsb.lol %s,%s: %s", lat, lon, exc)
-                return []
+                logger.warning("[positions] adsb.lol %s,%s unreachable: %s", lat, lon, exc)
+                return [], True
+            if res.status_code == 429:
+                wait = self._retry_after_seconds(res)
+                self._cooldown_until[center] = time.monotonic() + wait
+                logger.warning(
+                    "[positions] adsb.lol %s,%s rate-limited (429) — cooling down %ds",
+                    lat,
+                    lon,
+                    int(wait),
+                )
+                return [], True
+            if res.status_code != 200:
+                logger.warning("[positions] adsb.lol %s,%s HTTP %s", lat, lon, res.status_code)
+                return [], True
+            try:
+                rows = [normalise_adsb(ac) for ac in res.json().get("ac", [])]
+            except ValueError as exc:
+                logger.warning("[positions] adsb.lol %s,%s bad payload: %s", lat, lon, exc)
+                return [], True
+            return [row for row in rows if row], False
 
         workers = min(self.settings.adsb_max_workers, len(EU_CENTERS))
+        failed = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for rows in pool.map(fetch_center, EU_CENTERS):
+            for rows, circle_failed in pool.map(fetch_center, EU_CENTERS):
+                failed += circle_failed
                 for row in rows:
                     by_hex[row["icao24"]] = row
-        return by_hex
+        return by_hex, failed
 
     def _fetch_opensky(self) -> list[dict[str, Any]]:
         auth = None
@@ -184,7 +217,26 @@ class PositionsSource(Source):
         return []
 
     def fetch(self) -> list[dict[str, Any]]:
-        by_hex = self._fetch_adsb()
-        if by_hex:
-            return list(by_hex.values())
-        return self._fetch_opensky()
+        by_hex, failed = self._fetch_adsb()
+        adsb_n = sum(1 for row in by_hex.values() if row.get("source") == "adsb.lol")
+        if failed:
+            # Degraded tick: fill the gaps from OpenSky, adsb.lol rows win.
+            for row in self._fetch_opensky():
+                by_hex.setdefault(row["icao24"], row)
+            logger.warning(
+                "[positions] %d/%d adsb.lol circles failed — merged %d OpenSky rows (%d adsb.lol)",
+                failed,
+                len(EU_CENTERS),
+                len(by_hex) - adsb_n,
+                adsb_n,
+            )
+        if not by_hex:
+            logger.warning("[positions] no live aircraft from adsb.lol or OpenSky")
+            return []
+        logger.info(
+            "[positions] %d aircraft (%d adsb.lol, %d opensky)",
+            len(by_hex),
+            adsb_n,
+            len(by_hex) - adsb_n,
+        )
+        return list(by_hex.values())
