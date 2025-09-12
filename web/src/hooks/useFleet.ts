@@ -10,7 +10,9 @@ import {
 } from "../lib/fleet";
 
 const POLL_MS = 5000;
-const TICK_MS = 1000;
+// Dead-reckoning creates a fresh object per aircraft; 1.5s keeps motion smooth
+// without churning thousands of allocations every second.
+const TICK_MS = 1500;
 
 export interface FleetState {
   aircraft: Aircraft[];
@@ -115,7 +117,7 @@ export function useFleet(): FleetState {
   // Smooth interpolation between polls.
   useEffect(() => {
     const id = setInterval(() => {
-      if (!baseRef.current.length) return;
+      if (document.hidden || !baseRef.current.length) return;
       const elapsed = (Date.now() - baseTimeRef.current) / 1000;
       const advanced = baseRef.current.map((a) => advance(a, elapsed));
       setState((s) => ({ ...s, aircraft: advanced }));
