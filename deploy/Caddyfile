@@ -1,0 +1,29 @@
+# Live API gateway — terminates TLS in front of the collector's FastAPI.
+#
+#   collector (systemd)  ->  127.0.0.1:8090
+#   Caddy                ->  https://vps.swadhin.cv  (auto Let's Encrypt)
+#
+# Install:  cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
+# (Caddy obtains and renews the certificate automatically; ports 80 + 443 must
+#  be reachable from the internet for the ACME challenge.)
+
+vps.swadhin.cv {
+	# The live snapshot is a ~3 MB JSON payload polled every few seconds;
+	# compressing it cuts bandwidth by ~10x for negligible CPU.
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8090
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Access logs go to the systemd journal: journalctl -u caddy -f
+	log {
+		output stderr
+		format console
+	}
+}
