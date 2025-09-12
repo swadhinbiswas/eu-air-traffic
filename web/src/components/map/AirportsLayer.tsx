@@ -18,9 +18,14 @@ interface AirportsLayerProps {
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
 function toGeoJson(airports: Airport[], labelCount: number): GeoJSON.FeatureCollection {
+  // Render every airport: traffic metrics only exist once flight history has
+  // landed, so requiring total_flights > 0 hid the entire network before then.
   const traffic = airports
-    .filter((a) => Number.isFinite(a.lat) && Number.isFinite(a.lon) && a.total_flights > 0)
-    .sort((a, b) => b.total_flights - a.total_flights);
+    .filter((a) => Number.isFinite(a.lat) && Number.isFinite(a.lon))
+    .sort(
+      (a, b) =>
+        b.total_flights - a.total_flights || (b.score ?? 0) - (a.score ?? 0)
+    );
   const major = new Set(traffic.slice(0, labelCount).map((a) => a.icao));
 
   return {
@@ -34,7 +39,10 @@ function toGeoJson(airports: Airport[], labelCount: number): GeoJSON.FeatureColl
         iata: a.iata ?? "",
         flights: a.total_flights,
         delay: a.avg_delay_minutes ?? 0,
+        has_metrics: a.avg_delay_minutes !== null,
         on_time: a.on_time_rate ?? 0,
+        // Without traffic, importance comes from the capability score instead.
+        rank: a.total_flights > 0 ? a.total_flights : (a.score ?? 0) / 10,
         major: major.has(a.icao),
         label: a.icao,
       },
@@ -76,18 +84,20 @@ export function AirportsLayer({
           "circle-radius": [
             "interpolate",
             ["linear"],
-            ["get", "flights"],
+            ["get", "rank"],
             0,
+            4,
             5,
-            50,
-            9,
-            200,
-            15,
-            600,
-            24,
+            7,
+            10,
+            12,
+            20,
+            20,
           ],
           "circle-color": [
             "case",
+            ["!", ["get", "has_metrics"]],
+            "#7dd3fc",
             ["<=", ["coalesce", ["get", "delay"], 0], 5],
             "#34d399",
             ["<=", ["coalesce", ["get", "delay"], 0], 15],
@@ -108,18 +118,20 @@ export function AirportsLayer({
           "circle-radius": [
             "interpolate",
             ["linear"],
-            ["get", "flights"],
+            ["get", "rank"],
             0,
-            2.5,
-            50,
-            4,
-            200,
-            6.5,
-            600,
+            2.2,
+            5,
+            3.2,
             10,
+            4.6,
+            20,
+            7,
           ],
           "circle-color": [
             "case",
+            ["!", ["get", "has_metrics"]],
+            "#7dd3fc",
             ["<=", ["coalesce", ["get", "delay"], 0], 5],
             "#34d399",
             ["<=", ["coalesce", ["get", "delay"], 0], 15],

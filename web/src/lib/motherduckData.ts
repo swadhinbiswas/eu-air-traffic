@@ -134,7 +134,7 @@ export async function fetchAirports(): Promise<Airport[]> {
   const rows = await q(
     "SELECT a.airport_icao AS icao, a.iata_code AS iata, a.name, a.municipality AS city, " +
       "a.iso_country AS country, a.latitude_deg AS lat, a.longitude_deg AS lon, " +
-      "a.elevation_ft, a.type, COALESCE(m.total_flights, 0) AS total_flights, " +
+      "a.elevation_ft, a.type, a.score, COALESCE(m.total_flights, 0) AS total_flights, " +
       "m.avg_delay_minutes, m.on_time_rate " +
       "FROM main.dim_airport a LEFT JOIN main.gold_airport_metrics m " +
       "ON m.airport_icao = a.airport_icao ORDER BY a.airport_icao",
@@ -153,6 +153,7 @@ export async function fetchAirports(): Promise<Airport[]> {
     total_flights: num(r.total_flights),
     avg_delay_minutes: r.avg_delay_minutes === null ? null : num(r.avg_delay_minutes),
     on_time_rate: r.on_time_rate === null ? null : num(r.on_time_rate),
+    score: r.score === null || r.score === undefined ? null : num(r.score),
   }));
 }
 

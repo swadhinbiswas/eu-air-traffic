@@ -21,6 +21,8 @@ export interface Airport {
   total_flights: number;
   avg_delay_minutes: number | null;
   on_time_rate: number | null;
+  /** Capability score from the reference data — used when there is no traffic yet. */
+  score?: number | null;
 }
 
 export interface Position {

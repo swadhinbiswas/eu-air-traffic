@@ -4,6 +4,7 @@ import type { MapMouseEvent } from "maplibre-gl";
 import { AircraftLayer } from "./AircraftLayer";
 import { AirportsLayer } from "./AirportsLayer";
 import { RoutesLayer } from "./RoutesLayer";
+import { FlightPathsLayer } from "./FlightPathsLayer";
 import { WeatherLayer } from "./WeatherLayer";
 import { RadarLayer } from "./RadarLayer";
 import { TerminatorLayer } from "./TerminatorLayer";
@@ -16,6 +17,7 @@ import type { RouteDatum } from "@/lib/bundle";
 
 export type LayerId =
   | "aircraft"
+  | "paths"
   | "airports"
   | "routes"
   | "weather"
@@ -229,6 +231,12 @@ export function WorldMap({
       <RadarLayer visible={visibleLayers.has("radar")} />
       <TerminatorLayer visible={visibleLayers.has("terminator")} />
       <RoutesLayer routes={routes} airports={airports} visible={visibleLayers.has("routes")} />
+      <FlightPathsLayer
+        aircraft={aircraft}
+        airports={airports}
+        visible={visibleLayers.has("paths")}
+        selectedHex={selectedHex}
+      />
       <AircraftLayer
         aircraft={aircraft}
         visible={visibleLayers.has("aircraft")}

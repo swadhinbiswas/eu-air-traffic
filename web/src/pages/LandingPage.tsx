@@ -33,8 +33,9 @@ import { cn } from "@/lib/utils";
 
 const LAYERS: { id: LayerId; label: string }[] = [
   { id: "aircraft", label: "Aircraft" },
+  { id: "paths", label: "Routes" },
   { id: "airports", label: "Airports" },
-  { id: "routes", label: "Routes" },
+  { id: "routes", label: "Network" },
   { id: "weather", label: "Weather" },
   { id: "radar", label: "Radar" },
   { id: "terminator", label: "Night" },
@@ -330,7 +331,7 @@ export function LandingPage() {
   const { data: stories } = useStories();
 
   const [visibleLayers, setVisibleLayers] = useState<Set<LayerId>>(
-    new Set(["aircraft", "airports", "routes", "weather", "radar", "terminator"])
+    new Set(["aircraft", "paths", "airports", "weather", "radar", "terminator"])
   );
   const [autoRotate, setAutoRotate] = useState(true);
   const [selected, setSelected] = useState<MapSelection | null>(null);
