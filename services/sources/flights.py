@@ -1,6 +1,9 @@
 """Flight movements (arrivals/departures) from OpenSky Network.
 
-Polls ``/flights/airport`` for the busiest European hubs. Requires OpenSky
+Polls ``/flights/departure`` and ``/flights/arrival`` for the busiest European
+hubs. The combined ``/flights/airport`` endpoint only yields departures, so a
+store ends up with one known end per flight; the dedicated endpoints give both
+directions and the arrival one normally knows both ends. Requires OpenSky
 credentials; without them the source returns an empty list rather than failing.
 """
 
@@ -67,21 +70,28 @@ class FlightsSource(Source):
             return (s.opensky_username, s.opensky_password)
         return None
 
-    def _airport_flights(self, icao: str, begin: int, end: int) -> list[dict[str, Any]]:
+    def _airport_flights(self, icao: str, begin: int, end: int, kind: str) -> list[dict[str, Any]]:
+        """``kind`` is ``departure`` or ``arrival``.
+
+        The combined ``/flights/airport`` endpoint only returns departures in
+        practice, which left every store as "departure known, arrival unknown".
+        The dedicated endpoints return each direction, and the arrival one
+        usually knows both ends.
+        """
         params: dict[str, str | int] = {"airport": icao, "begin": begin, "end": end}
         try:
             res = self._session.get(
-                f"{OPENSKY}/flights/airport",
+                f"{OPENSKY}/flights/{kind}",
                 params=params,
                 headers=HEADERS,
                 auth=self._auth,
                 timeout=self.settings.request_timeout_seconds,
             )
         except requests.RequestException as exc:
-            logger.debug("[flights] opensky %s: %s", icao, exc)
+            logger.debug("[flights] opensky %s %s: %s", kind, icao, exc)
             return []
         if res.status_code != 200:
-            logger.debug("[flights] opensky %s -> HTTP %s", icao, res.status_code)
+            logger.debug("[flights] opensky %s %s -> HTTP %s", kind, icao, res.status_code)
             return []
         try:
             payload = res.json()
@@ -104,35 +114,44 @@ class FlightsSource(Source):
 
         def fetch_airport(icao: str) -> list[dict[str, Any]]:
             out: list[dict[str, Any]] = []
-            for flight in self._airport_flights(icao, begin, end):
-                icao24 = flight.get("icao24")
-                if not icao24:
-                    continue
-                first_seen = flight.get("firstSeen")
-                last_seen = flight.get("lastSeen")
-                out.append(
-                    {
-                        "flight_id": f"{icao24}_{first_seen or end}",
-                        "icao24": str(icao24).upper(),
-                        "callsign": (flight.get("callsign") or "").strip(),
-                        "departure_icao": flight.get("estDepartureAirport"),
-                        "arrival_icao": flight.get("estArrivalAirport"),
-                        "actual_departure": (
-                            datetime.fromtimestamp(first_seen, tz=UTC).isoformat()
-                            if first_seen
-                            else None
-                        ),
-                        "actual_arrival": (
-                            datetime.fromtimestamp(last_seen, tz=UTC).isoformat()
-                            if last_seen
-                            else None
-                        ),
-                        "status": "landed" if flight.get("estArrivalAirport") else "en_route",
-                        "delay_minutes": 0,
-                        "source": "opensky",
-                        "collected_at": collected_at,
-                    }
-                )
+            for kind in ("departure", "arrival"):
+                for flight in self._airport_flights(icao, begin, end, kind):
+                    icao24 = flight.get("icao24")
+                    if not icao24:
+                        continue
+                    first_seen = flight.get("firstSeen")
+                    last_seen = flight.get("lastSeen")
+                    # The queried airport is authoritative for its own direction
+                    # even when OpenSky omits the estimated field.
+                    departure = flight.get("estDepartureAirport")
+                    arrival = flight.get("estArrivalAirport")
+                    if kind == "departure" and not departure:
+                        departure = icao
+                    if kind == "arrival" and not arrival:
+                        arrival = icao
+                    out.append(
+                        {
+                            "flight_id": f"{icao24}_{first_seen or end}",
+                            "icao24": str(icao24).upper(),
+                            "callsign": (flight.get("callsign") or "").strip(),
+                            "departure_icao": departure,
+                            "arrival_icao": arrival,
+                            "actual_departure": (
+                                datetime.fromtimestamp(first_seen, tz=UTC).isoformat()
+                                if first_seen
+                                else None
+                            ),
+                            "actual_arrival": (
+                                datetime.fromtimestamp(last_seen, tz=UTC).isoformat()
+                                if last_seen
+                                else None
+                            ),
+                            "status": "landed" if arrival else "en-route",
+                            "delay_minutes": 0,
+                            "source": "opensky",
+                            "collected_at": collected_at,
+                        }
+                    )
             return out
 
         workers = min(self.settings.flights_max_workers, len(airports))

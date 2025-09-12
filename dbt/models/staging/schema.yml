@@ -21,17 +21,15 @@ models:
               config:
                 severity: warn
       - name: departure_icao
-        description: "Departure airport ICAO code"
+        description: "Departure airport ICAO code (null when only the arrival end is known)"
         tests:
-          - not_null
           - relationships:
               arguments:
                 to: ref('stg_dim_airport')
                 field: airport_icao
       - name: arrival_icao
-        description: "Arrival airport ICAO code"
+        description: "Arrival airport ICAO code (null when only the departure end is known)"
         tests:
-          - not_null
           - relationships:
               arguments:
                 to: ref('stg_dim_airport')

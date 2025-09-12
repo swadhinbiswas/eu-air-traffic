@@ -160,12 +160,21 @@ def transform_flights(df: pl.DataFrame, app_settings: Settings | None = None) ->
     if "cancelled" in df.columns:
         df = df.with_columns(pl.col("cancelled").cast(pl.Boolean).fill_null(False))
 
+    # OpenSky usually knows only one end of a movement: a departure query gives
+    # the origin, an arrival query the destination. Require at least one known
+    # airport instead of both, and only reject when the two ends agree.
+    has_departure = pl.col("departure_icao").is_not_null() & (pl.col("departure_icao") != "")
+    has_arrival = pl.col("arrival_icao").is_not_null() & (pl.col("arrival_icao") != "")
+    ends_differ = (
+        pl.col("departure_icao").is_null()
+        | pl.col("arrival_icao").is_null()
+        | (pl.col("departure_icao") != pl.col("arrival_icao"))
+    )
     valid = (
         pl.col("flight_id").is_not_null()
         & (pl.col("flight_id") != "")
-        & pl.col("departure_icao").is_not_null()
-        & pl.col("arrival_icao").is_not_null()
-        & (pl.col("departure_icao") != pl.col("arrival_icao"))
+        & (has_departure | has_arrival)
+        & ends_differ
     )
     df, _ = _split_quarantine(
         df, valid, "flights", "missing or invalid flight/departure/arrival keys", app_settings
@@ -173,6 +182,15 @@ def transform_flights(df: pl.DataFrame, app_settings: Settings | None = None) ->
 
     if df.is_empty():
         return df
+    # The same flight can be observed twice (once at each end). Dedup keeps the
+    # last row, so order the most complete record last and let it win.
+    df = df.with_columns(
+        (
+            pl.col("departure_icao").is_null().cast(pl.Int8)
+            + pl.col("arrival_icao").is_null().cast(pl.Int8)
+        ).alias("_missing_ends")
+    )
+    df = df.sort(["_missing_ends", "flight_id"], descending=[True, False]).drop("_missing_ends")
     df = df.unique(subset=["flight_id"], keep="last")
     if "scheduled_departure" in df.columns:
         df = df.sort("scheduled_departure", nulls_last=True)

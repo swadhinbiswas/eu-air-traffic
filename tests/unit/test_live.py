@@ -220,6 +220,95 @@ def test_collector_publishes_positions_on_a_slower_cadence(monkeypatch) -> None:
     assert svc.poll_once(svc.sources[0]) == 1
 
 
+class _FlightSession:
+    """OpenSky's dedicated endpoints, one record per direction."""
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def get(self, url, headers=None, timeout=None, params=None, auth=None):
+        self.calls.append(url)
+        if url.endswith("/flights/departure"):
+            return _FakeResponse(
+                payload=[
+                    {
+                        "icao24": "aaa111",
+                        "firstSeen": 100,
+                        "lastSeen": 200,
+                        "callsign": "DLH1",
+                        "estDepartureAirport": "EDDF",
+                        "estArrivalAirport": None,
+                    }
+                ]
+            )
+        return _FakeResponse(
+            payload=[
+                {
+                    "icao24": "bbb222",
+                    "firstSeen": 300,
+                    "lastSeen": 400,
+                    "callsign": "DLH2",
+                    "estDepartureAirport": "EGLL",
+                    "estArrivalAirport": "EDDF",
+                }
+            ]
+        )
+
+
+def test_flights_source_queries_both_directions(monkeypatch) -> None:
+    from services.sources.flights import FlightsSource
+
+    session = _FlightSession()
+    src = FlightsSource(session=session)
+    monkeypatch.setattr(src.settings, "opensky_username", "user")
+    monkeypatch.setattr(src.settings, "opensky_password", "pass")
+    monkeypatch.setattr(src.settings, "flights_airports", 1)
+
+    rows = src.fetch()
+    assert any(url.endswith("/flights/departure") for url in session.calls)
+    assert any(url.endswith("/flights/arrival") for url in session.calls)
+    by_id = {row["flight_id"]: row for row in rows}
+    assert by_id["aaa111_100"]["departure_icao"] == "EDDF"
+    assert by_id["aaa111_100"]["arrival_icao"] is None
+    assert by_id["aaa111_100"]["status"] == "en-route"
+    assert by_id["bbb222_300"]["arrival_icao"] == "EDDF"
+    assert by_id["bbb222_300"]["status"] == "landed"
+
+
+def test_flights_source_falls_back_to_queried_airport(monkeypatch) -> None:
+    from services.sources.flights import FlightsSource
+
+    class _NoEstimate(_FlightSession):
+        def get(self, url, headers=None, timeout=None, params=None, auth=None):
+            self.calls.append(url)
+            return _FakeResponse(
+                payload=[
+                    {
+                        "icao24": "ccc333",
+                        "firstSeen": 500,
+                        "lastSeen": 600,
+                        "callsign": "DLH3",
+                        "estDepartureAirport": None,
+                        "estArrivalAirport": None,
+                    }
+                ]
+            )
+
+    session = _NoEstimate()
+    src = FlightsSource(session=session)
+    monkeypatch.setattr(src.settings, "opensky_username", "user")
+    monkeypatch.setattr(src.settings, "opensky_password", "pass")
+    monkeypatch.setattr(src.settings, "flights_airports", 1)
+
+    rows = src.fetch()
+    # The airport we queried is authoritative for its own direction.
+    assert len(rows) == 2
+    departure = next(r for r in rows if r["departure_icao"] == "EDDF")
+    arrival = next(r for r in rows if r["arrival_icao"] == "EDDF")
+    assert departure["arrival_icao"] is None
+    assert arrival["departure_icao"] is None
+
+
 def test_ground_vehicle_emissions_are_zero() -> None:
     from services.emissions import enrich_emissions
 
