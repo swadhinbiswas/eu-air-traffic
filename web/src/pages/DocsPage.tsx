@@ -82,7 +82,7 @@ export function DocsPage() {
       → GET /live/snapshot → MapLibre globe / Analytics / Stories
       → GitHub Actions sink → Bronze/Silver Parquet → Hugging Face
       → dbt (staging → intermediate → marts → reports) → MotherDuck (Gold)
-      → static bundle + SQL API → Analytics / Catalog / Explorer / SQL / Ops`}
+      → MotherDuck Gold (read-only) + VPS live API → Analytics / Catalog / Explorer / SQL / Ops`}
           </pre>
         </div>
         <div className="mt-3 rounded-lg border border-white/5 bg-white/[0.02] p-4">

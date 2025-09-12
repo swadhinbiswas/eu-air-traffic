@@ -410,17 +410,34 @@ export function LandingPage() {
             `${a.callsign || a.hex} · ${a.reg ?? a.type ?? ""} · FL${Math.round((a.altFt ?? 0) / 100)} · ${a.gsKt?.toFixed(0) ?? "—"} kt`
         ),
     ];
-    return items.length ? items : ["Awaiting live feed…"];
+    return items;
   }, [stories, fleet.aircraft]);
 
+  const liveCount = fleet.aircraft.length;
   const statusLabel =
     fleet.status === "live"
-      ? fleet.source === "live"
-        ? "LIVE ADS-B"
-        : "LIVE API"
+      ? "LIVE"
       : fleet.status === "connecting"
         ? "CONNECTING"
-        : "SNAPSHOT";
+        : liveCount > 0
+          ? "SNAPSHOT"
+          : "OFFLINE";
+  const statusTone =
+    fleet.status === "live"
+      ? "text-emerald-400"
+      : fleet.status === "connecting"
+        ? "text-amber-400"
+        : liveCount > 0
+          ? "text-cyan-400"
+          : "text-red-400";
+  const statusDot =
+    fleet.status === "live"
+      ? "bg-emerald-400"
+      : fleet.status === "connecting"
+        ? "bg-amber-400"
+        : liveCount > 0
+          ? "bg-cyan-400"
+          : "bg-red-400";
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
@@ -439,12 +456,17 @@ export function LandingPage() {
         <div className="pointer-events-auto panel flex items-center gap-3 px-3 py-2">
           <span className="relative grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/15 text-emerald-400">
             <Radar className="h-4 w-4" />
-            <span className="absolute inset-0 rounded-lg text-emerald-400 pulse-ring" />
+            {fleet.status === "live" && (
+              <span className="absolute inset-0 rounded-lg text-emerald-400 pulse-ring" />
+            )}
           </span>
           <div className="leading-tight">
             <div className="text-xs font-semibold text-zinc-100">European Airspace</div>
-            <div className="mono text-[10px] text-zinc-500">
-              {statusLabel} · {nf(fleet.aircraft.length)} targets
+            <div className="mono flex items-center gap-1.5 text-[10px] text-zinc-500">
+              <span className={cn("inline-block h-1.5 w-1.5 rounded-full", statusDot)} />
+              <span className={statusTone}>{statusLabel}</span>
+              <span className="text-zinc-600">·</span>
+              {liveCount > 0 ? `${nf(liveCount)} targets` : "awaiting feed"}
             </div>
           </div>
         </div>
@@ -509,15 +531,18 @@ export function LandingPage() {
 
       {/* Bottom-left: KPI strip */}
       <div className="pointer-events-none absolute bottom-16 left-4 z-10 flex flex-wrap gap-2">
-        <HudStat label="Live aircraft" value={nf(fleet.aircraft.length)} />
-        <HudStat label="Cruising >FL250" value={nf(stats.cruising)} />
-        <HudStat label="Avg altitude" value={`${nf(stats.avgAlt)} ft`} />
+        <HudStat label="Live aircraft" value={liveCount ? nf(liveCount) : "—"} />
+        <HudStat label="Cruising >FL250" value={liveCount ? nf(stats.cruising) : "—"} />
+        <HudStat label="Avg altitude" value={liveCount ? `${nf(stats.avgAlt)} ft` : "—"} />
         <HudStat
           label="Emergencies"
-          value={nf(stats.emergencies)}
-          tone={stats.emergencies > 0 ? "text-red-400" : undefined}
+          value={liveCount ? nf(stats.emergencies) : "—"}
+          tone={liveCount && stats.emergencies > 0 ? "text-red-400" : undefined}
         />
-        <HudStat label="Weather stns" value={nf(weatherState.stations.length)} />
+        <HudStat
+          label="Weather stns"
+          value={weatherState.stations.length ? nf(weatherState.stations.length) : "—"}
+        />
         <HudStat
           label="Avg delay"
           value={(kpis?.total_flights ?? 0) > 0 ? `${nf(kpis?.avg_delay_minutes ?? 0, 0)} min` : "—"}
@@ -569,13 +594,19 @@ export function LandingPage() {
           <ArrowUpRight className="h-3 w-3" />
         </Link>
         <div className="relative flex-1 overflow-hidden">
-          <div className="animate-ticker flex w-max gap-8 whitespace-nowrap">
-            {[...ticker, ...ticker].map((t, i) => (
-              <span key={i} className="mono text-[10px] text-zinc-500">
-                {t}
-              </span>
-            ))}
-          </div>
+          {ticker.length ? (
+            <div className="animate-ticker flex w-max gap-8 whitespace-nowrap">
+              {[...ticker, ...ticker].map((t, i) => (
+                <span key={i} className="mono text-[10px] text-zinc-500">
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="mono text-[10px] text-zinc-600">
+              Awaiting live feed from the VPS collector…
+            </span>
+          )}
         </div>
         <span className="mono hidden flex-none text-[10px] text-zinc-600 lg:block">
           © CARTO · OSM · RainViewer
