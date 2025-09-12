@@ -78,12 +78,15 @@ def upload_directory(
     files = [p for p in root.rglob("*") if p.is_file() and (not patterns or p.suffix in patterns)]
     if not files:
         return 0
-    ensure_repo(app_settings)
+    if not ensure_repo(app_settings):
+        raise RuntimeError("[hf] cannot ensure the dataset repo — refusing to report success")
     uploaded = 0
     for path in files:
         repo_path = f"{repo_prefix.rstrip('/')}/{path.relative_to(root).as_posix()}"
         if upload_file(path, repo_path, app_settings):
             uploaded += 1
+    if uploaded != len(files):
+        raise RuntimeError(f"[hf] uploaded only {uploaded}/{len(files)} files to {repo_prefix}")
     logger.info("[hf] uploaded %s/%s files → %s", uploaded, len(files), repo_prefix)
     return uploaded
 

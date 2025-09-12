@@ -13,8 +13,8 @@ import { createClient, type Client, type Row } from "@libsql/client/web";
 
 export type TursoRow = Row;
 
-const URL_ = (import.meta.env.VITE_TURSO_URL as string | undefined) || "";
-const TOKEN = (import.meta.env.VITE_TURSO_TOKEN as string | undefined) || "";
+const URL_ = (import.meta.env.VITE_TURSO_URL as string | undefined)?.trim() || "";
+const TOKEN = (import.meta.env.VITE_TURSO_TOKEN as string | undefined)?.trim() || "";
 
 let client: Client | null = null;
 
