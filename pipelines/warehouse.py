@@ -106,6 +106,105 @@ _EMPTY_FACT_NOTAMS = {
     "collected_at": "VARCHAR",
 }
 
+_DIM_AIRPORT_COLUMNS = (
+    "airport_icao",
+    "name",
+    "type",
+    "latitude_deg",
+    "longitude_deg",
+    "elevation_ft",
+    "iso_country",
+    "municipality",
+    "iata_code",
+    "score",
+)
+_DIM_AIRPORT_NUMERIC = {"latitude_deg", "longitude_deg", "elevation_ft", "score"}
+_EMPTY_DIM_AIRPORT = {
+    c: ("DOUBLE" if c in _DIM_AIRPORT_NUMERIC else "VARCHAR") for c in _DIM_AIRPORT_COLUMNS
+}
+
+_DIM_AIRLINE_COLUMNS = ("airline_icao", "airline_name")
+_EMPTY_DIM_AIRLINE = {"airline_icao": "VARCHAR", "airline_name": "VARCHAR"}
+
+_DIM_FUEL_COLUMNS = ("date", "region", "price_per_litre", "currency")
+_EMPTY_DIM_FUEL = {
+    "date": "DATE",
+    "region": "VARCHAR",
+    "price_per_litre": "DOUBLE",
+    "currency": "VARCHAR",
+}
+
+_DIM_AIRCRAFT_COLUMNS = (
+    "type_icao",
+    "type_iata",
+    "manufacturer",
+    "family",
+    "engine",
+    "capacity",
+    "range_km",
+)
+_DIM_AIRCRAFT_NUMERIC = {"capacity", "range_km"}
+_EMPTY_DIM_AIRCRAFT = {
+    c: ("DOUBLE" if c in _DIM_AIRCRAFT_NUMERIC else "VARCHAR") for c in _DIM_AIRCRAFT_COLUMNS
+}
+
+_DIM_ROUTE_COLUMNS = ("origin", "destination", "airline", "stops", "equipment", "distance_km")
+_DIM_ROUTE_NUMERIC = {"stops", "distance_km"}
+_EMPTY_DIM_ROUTE = {
+    c: ("DOUBLE" if c in _DIM_ROUTE_NUMERIC else "VARCHAR") for c in _DIM_ROUTE_COLUMNS
+}
+
+_FACT_POSITIONS_COLUMNS = (
+    "icao24",
+    "callsign",
+    "registration",
+    "aircraft_type",
+    "aircraft_class",
+    "emitter_class",
+    "is_cargo",
+    "is_military",
+    "operator_name",
+    "operator_country",
+    "operator_category",
+    "type_name",
+    "manufacturer",
+    "airframe",
+    "wake_category",
+    "latitude",
+    "longitude",
+    "altitude",
+    "velocity",
+    "heading",
+    "vertical_rate",
+    "squawk",
+    "emergency",
+    "co2_kg_per_hour",
+    "fuel_burn_kg_per_hour",
+    "co2_estimated",
+    "source",
+    "collected_at",
+)
+_POSITION_NUMERIC = {
+    "latitude",
+    "longitude",
+    "altitude",
+    "velocity",
+    "heading",
+    "vertical_rate",
+    "co2_kg_per_hour",
+    "fuel_burn_kg_per_hour",
+}
+_POSITION_BOOLEAN = {"is_cargo", "is_military", "co2_estimated"}
+_EMPTY_FACT_POSITIONS = {
+    column: (
+        "BOOLEAN"
+        if column in _POSITION_BOOLEAN
+        else "DOUBLE"
+        if column in _POSITION_NUMERIC
+        else "VARCHAR"
+    )
+    for column in _FACT_POSITIONS_COLUMNS
+}
 _EMPTY_WEATHER = {
     "station_icao": "VARCHAR",
     "timestamp": "TIMESTAMP",
@@ -129,6 +228,33 @@ _EMPTY_WEATHER = {
     "flight_category": "VARCHAR",
     "raw_metar": "VARCHAR",
 }
+
+_WEATHER_COLUMNS = tuple(_EMPTY_WEATHER.keys())
+
+
+def _ensure_columns(
+    df: pl.DataFrame,
+    columns: tuple[str, ...],
+    numeric: set[str] | frozenset[str] = frozenset(),
+    boolean: set[str] | frozenset[str] = frozenset(),
+) -> pl.DataFrame:
+    """Project a frame onto a fixed schema, filling absent columns with NULLs.
+
+    dbt staging views reference the full column set; a partial Silver frame (or
+    an empty one) would otherwise leave them missing and fail to compile.
+    """
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        exprs = []
+        for column in missing:
+            if column in boolean:
+                exprs.append(pl.lit(None, dtype=pl.Boolean).alias(column))
+            elif column in numeric:
+                exprs.append(pl.lit(None, dtype=pl.Float64).alias(column))
+            else:
+                exprs.append(pl.lit(None, dtype=pl.Utf8).alias(column))
+        df = df.with_columns(exprs)
+    return df.select(list(columns))
 
 
 class WarehouseBuilder:
@@ -160,33 +286,22 @@ class WarehouseBuilder:
         df = pl.read_parquet(airports_parquet) if airports_parquet.exists() else pl.DataFrame()
         if df.is_empty():
             logger.info("[warehouse] dim_airport: no data")
-            self._create_or_replace_empty("dim_airport", {"airport_icao": "VARCHAR"})
+            self._create_or_replace_empty("dim_airport", _EMPTY_DIM_AIRPORT)
             return
         clean = df.rename({"ident": "airport_icao"})
-        clean = clean.select(
-            "airport_icao",
-            "name",
-            "type",
-            "latitude_deg",
-            "longitude_deg",
-            "elevation_ft",
-            "iso_country",
-            "municipality",
-            "iata_code",
-            "score",
-        ).unique(subset=["airport_icao"])
+        clean = _ensure_columns(clean, _DIM_AIRPORT_COLUMNS, _DIM_AIRPORT_NUMERIC).unique(
+            subset=["airport_icao"]
+        )
         self._load_upsert("dim_airport", clean, ["airport_icao"])
         logger.info("[warehouse] dim_airport rows=%s", clean.height)
 
     def build_dim_airline(self) -> None:
         flights = self._read_silver("flights")
         if flights.is_empty():
-            self._create_or_replace_empty(
-                "dim_airline", {"airline_icao": "VARCHAR", "airline_name": "VARCHAR"}
-            )
+            self._create_or_replace_empty("dim_airline", _EMPTY_DIM_AIRLINE)
             return
         airlines = (
-            flights.select("airline_icao", "airline_name")
+            _ensure_columns(flights, _DIM_AIRLINE_COLUMNS)
             .filter(pl.col("airline_icao").is_not_null())
             .unique(subset=["airline_icao"])
         )
@@ -213,11 +328,11 @@ class WarehouseBuilder:
     def build_dim_fuel(self) -> None:
         fuel = self._read_silver("fuel")
         if fuel.is_empty():
-            self._create_or_replace_empty("dim_fuel", {"date": "DATE", "region": "VARCHAR"})
+            self._create_or_replace_empty("dim_fuel", _EMPTY_DIM_FUEL)
             return
         self._load_upsert(
             "dim_fuel",
-            fuel.select("date", "region", "price_per_litre", "currency"),
+            _ensure_columns(fuel, _DIM_FUEL_COLUMNS, {"price_per_litre"}),
             ["date", "region"],
         )
         logger.info("[warehouse] dim_fuel rows=%s", fuel.height)
@@ -225,35 +340,22 @@ class WarehouseBuilder:
     def build_dim_aircraft(self) -> None:
         aircraft = self._read_silver("aircraft")
         if aircraft.is_empty():
-            self._create_or_replace_empty("dim_aircraft", {"type_icao": "VARCHAR"})
+            self._create_or_replace_empty("dim_aircraft", _EMPTY_DIM_AIRCRAFT)
             return
-        dim = aircraft.select(
-            "type_icao",
-            "type_iata",
-            "manufacturer",
-            "family",
-            "engine",
-            "capacity",
-            "range_km",
-        ).unique(subset=["type_icao"])
+        dim = _ensure_columns(aircraft, _DIM_AIRCRAFT_COLUMNS, _DIM_AIRCRAFT_NUMERIC).unique(
+            subset=["type_icao"]
+        )
         self._load_upsert("dim_aircraft", dim, ["type_icao"])
         logger.info("[warehouse] dim_aircraft rows=%s", dim.height)
 
     def build_dim_route(self) -> None:
         routes = self._read_silver("routes")
         if routes.is_empty():
-            self._create_or_replace_empty(
-                "dim_route", {"origin": "VARCHAR", "destination": "VARCHAR"}
-            )
+            self._create_or_replace_empty("dim_route", _EMPTY_DIM_ROUTE)
             return
-        dim = routes.select(
-            "origin",
-            "destination",
-            "airline",
-            "stops",
-            "equipment",
-            "distance_km",
-        ).unique(subset=["origin", "destination", "airline"])
+        dim = _ensure_columns(routes, _DIM_ROUTE_COLUMNS, _DIM_ROUTE_NUMERIC).unique(
+            subset=["origin", "destination", "airline"]
+        )
         self._load_upsert("dim_route", dim, ["origin", "destination", "airline"])
         logger.info("[warehouse] dim_route rows=%s", dim.height)
 
@@ -262,7 +364,7 @@ class WarehouseBuilder:
         if emissions.is_empty():
             self._create_or_replace_empty("fact_emissions", _EMPTY_FACT_EMISSIONS)
             return
-        fact = emissions.select([c for c in _FACT_EMISSIONS_COLUMNS if c in emissions.columns])
+        fact = _ensure_columns(emissions, _FACT_EMISSIONS_COLUMNS)
         self._load_replace("fact_emissions", fact)
         logger.info("[warehouse] fact_emissions rows=%s", fact.height)
 
@@ -271,7 +373,7 @@ class WarehouseBuilder:
         if notams.is_empty():
             self._create_or_replace_empty("fact_notams", _EMPTY_FACT_NOTAMS)
             return
-        fact = notams.select([c for c in _FACT_NOTAMS_COLUMNS if c in notams.columns])
+        fact = _ensure_columns(notams, _FACT_NOTAMS_COLUMNS)
         self._load_replace("fact_notams", fact)
         logger.info("[warehouse] fact_notams rows=%s", fact.height)
 
@@ -281,7 +383,7 @@ class WarehouseBuilder:
         if flights.is_empty():
             self._create_or_replace_empty("fact_flights", _EMPTY_FACT_FLIGHTS)
             return
-        fact = flights.select([c for c in _FACT_FLIGHTS_COLUMNS if c in flights.columns])
+        fact = _ensure_columns(flights, _FACT_FLIGHTS_COLUMNS, {"delay_minutes"}, {"cancelled"})
         self._load_replace("fact_flights", fact)
         logger.info("[warehouse] fact_flights rows=%s", fact.height)
 
@@ -290,6 +392,11 @@ class WarehouseBuilder:
         if weather.is_empty():
             self._create_or_replace_empty("weather", _EMPTY_WEATHER)
             return
+        weather = _ensure_columns(
+            weather,
+            _WEATHER_COLUMNS,
+            numeric={"temperature_c", "humidity_pct", "wind_speed_ms", "visibility_m"},
+        )
         self._load_replace("weather", weather)
         logger.info("[warehouse] weather rows=%s", weather.height)
 
@@ -297,47 +404,12 @@ class WarehouseBuilder:
         """Latest live aircraft position per airframe (with class + CO₂)."""
         positions = self._read_silver("positions")
         if positions.is_empty():
-            self._create_or_replace_empty(
-                "fact_positions", {"icao24": "VARCHAR", "aircraft_class": "VARCHAR"}
-            )
+            self._create_or_replace_empty("fact_positions", _EMPTY_FACT_POSITIONS)
             return
-        keep = [
-            col
-            for col in (
-                "icao24",
-                "callsign",
-                "registration",
-                "aircraft_type",
-                "aircraft_class",
-                "emitter_class",
-                "is_cargo",
-                "is_military",
-                "operator_name",
-                "operator_country",
-                "operator_category",
-                "type_name",
-                "manufacturer",
-                "airframe",
-                "wake_category",
-                "latitude",
-                "longitude",
-                "altitude",
-                "velocity",
-                "heading",
-                "vertical_rate",
-                "squawk",
-                "emergency",
-                "co2_kg_per_hour",
-                "fuel_burn_kg_per_hour",
-                "co2_estimated",
-                "source",
-                "collected_at",
-            )
-            if col in positions.columns
-        ]
-        fact = positions.select(keep)
-        if "icao24" in fact.columns:
-            fact = fact.unique(subset=["icao24"], keep="last")
+        fact = _ensure_columns(
+            positions, _FACT_POSITIONS_COLUMNS, _POSITION_NUMERIC, _POSITION_BOOLEAN
+        )
+        fact = fact.unique(subset=["icao24"], keep="last")
         self._load_replace("fact_positions", fact)
         logger.info("[warehouse] fact_positions rows=%s", fact.height)
 

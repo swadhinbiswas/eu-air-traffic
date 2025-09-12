@@ -68,6 +68,9 @@ _Updated automatically on each ETL run._
 
 
 def upload_warehouse() -> dict[str, Any]:
+    if settings.mock_mode:
+        logger.warning("[hf] MOCK_MODE is on — refusing to upload synthetic data to the lake")
+        return {"status": "skipped", "reason": "mock_mode"}
     """Push bronze/silver/gold artifacts to the configured HF repo."""
     if not settings.huggingface_token:
         logger.warning("[hf] HF_TOKEN not set — skipping upload")
