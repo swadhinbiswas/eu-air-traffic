@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     # Live positions hit the dashboard every 15s, but only this often to the
     # lake — persisting every tick is ~17M rows/day and mostly unused.
     positions_publish_interval_seconds: float = Field(default=300.0, ge=30.0)
-    flights_interval_seconds: float = Field(default=300.0, ge=30.0)
+    flights_interval_seconds: float = Field(default=1800.0, ge=300.0)
     metar_interval_seconds: float = Field(default=300.0, ge=60.0)
     taf_interval_seconds: float = Field(default=900.0, ge=60.0)
     forecast_interval_seconds: float = Field(default=3600.0, ge=300.0)
