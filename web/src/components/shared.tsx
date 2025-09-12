@@ -122,10 +122,9 @@ export function BatchEmptyState({ compact = false }: { compact?: boolean }) {
       <div className="text-xs leading-relaxed">
         <p className="font-semibold text-amber-200">No flight history in the warehouse yet</p>
         <p className="mt-0.5 text-zinc-400">
-          Delay, punctuality and traffic charts need OpenSky flight movements. Add{" "}
-          <span className="mono text-zinc-300">OPENSKY_USERNAME</span> /{" "}
-          <span className="mono text-zinc-300">OPENSKY_PASSWORD</span> to the collector and the
-          next pipeline runs will backfill them. Live airspace below is unaffected.
+          Delay, punctuality and traffic charts read OpenSky flight movements. OpenSky publishes
+          them on a nightly batch with a limited daily credit budget, so this table fills as the
+          collector's polls land — not instantly. Live airspace below is unaffected.
         </p>
       </div>
     </div>

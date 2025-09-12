@@ -349,16 +349,17 @@ export async function fetchLiveMetars(): Promise<Metar[]> {
   const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot", 9000);
   if (!snap) throw new Error("live snapshot unavailable");
   return snap.weather.metar.map((m) => {
-    const vis = typeof m.visibility === "number" ? m.visibility : parseFloat(str(m.visibility, ""));
+    // Snapshot METAR rows are snake_case; visibility is metres.
+    const vis = m.visibility_m !== null ? m.visibility_m / 1000 : parseFloat(str(m.visibility_raw, ""));
     return {
-      icao: m.icao,
-      raw_text: m.rawOb ?? null,
-      temperature: m.temp ?? null,
-      wind_speed: m.windSpeedKt ?? null,
-      wind_direction: m.windDir ?? null,
+      icao: m.station_icao,
+      raw_text: m.raw_metar ?? null,
+      temperature: m.temperature_c ?? null,
+      wind_speed: m.wind_speed_kt ?? null,
+      wind_direction: m.wind_dir_deg ?? null,
       visibility: Number.isFinite(vis) ? vis : null,
-      cloud_cover: m.cover ?? null,
-      fetched_at: m.obsTime ?? null,
+      cloud_cover: m.condition ?? null,
+      fetched_at: m.timestamp ?? null,
     };
   });
 }
