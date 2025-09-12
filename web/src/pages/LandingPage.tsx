@@ -448,6 +448,7 @@ export function LandingPage() {
         weather={weatherState.stations}
         routes={routes}
         autoRotate={autoRotate}
+        selectedHex={selected?.kind === "aircraft" ? selected.data.hex : null}
         onSelect={setSelected}
       />
 

@@ -24,6 +24,12 @@ export type LayerId =
 
 const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json";
 
+/** Stable identity — an inline object would re-apply the projection every render. */
+const GLOBE = { type: "globe" } as const;
+// Cap the drawing buffer on HiDPI screens: 2x costs 4x the pixels for little
+// visible gain on a dark globe, and is the single biggest GPU saving.
+const PIXEL_RATIO = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 1.5);
+
 const INTERACTIVE_LAYERS = [
   "airports-dot",
   "weather-dot",
@@ -38,7 +44,42 @@ interface WorldMapProps {
   weather: WeatherStationView[];
   routes: RouteDatum[];
   autoRotate: boolean;
+  selectedHex?: string | null;
   onSelect: (selection: MapSelection | null) => void;
+}
+
+/**
+ * Globe at world scale, Mercator once you zoom in.
+ *
+ * The globe is the centrepiece, but re-projecting thousands of symbols onto a
+ * sphere gets expensive at city zoom and labels crowd near the poles.
+ * Switching past the threshold keeps both views at their best.
+ */
+function AdaptiveProjection() {
+  const { map, isLoaded } = useMap();
+
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+    let flat = map.getZoom() >= 5;
+    const apply = () => map.setProjection({ type: flat ? "mercator" : "globe" });
+
+    const onMoveEnd = () => {
+      const zoom = map.getZoom();
+      const next = flat ? zoom > 4.5 : zoom >= 5;
+      if (next !== flat) {
+        flat = next;
+        apply();
+      }
+    };
+
+    apply();
+    map.on("moveend", onMoveEnd);
+    return () => {
+      map.off("moveend", onMoveEnd);
+    };
+  }, [map, isLoaded]);
+
+  return null;
 }
 
 /** Gentle longitude drift that pauses while the user interacts. */
@@ -162,18 +203,26 @@ export function WorldMap({
   weather,
   routes,
   autoRotate,
+  selectedHex,
   onSelect,
 }: WorldMapProps) {
   return (
     <MapView
       theme="dark"
-      projection={{ type: "globe" }}
+      projection={GLOBE}
       center={[12, 50]}
       zoom={1.7}
       styles={{ dark: DARK_STYLE, light: DARK_STYLE }}
       className="h-full w-full"
+      // Performance: no symbol fade animation (avoids continuous repaints after
+      // every source update), a bounded tile cache, and no expired-tile churn.
+      fadeDuration={0}
+      maxTileCacheSize={80}
+      refreshExpiredTiles={false}
+      pixelRatio={PIXEL_RATIO}
     >
       <AutoRotate enabled={autoRotate} />
+      <AdaptiveProjection />
       <GlobeInteraction />
       <MapControls showZoom showCompass position="bottom-right" />
       <BackgroundClick onClear={() => onSelect(null)} />
@@ -183,6 +232,7 @@ export function WorldMap({
       <AircraftLayer
         aircraft={aircraft}
         visible={visibleLayers.has("aircraft")}
+        selectedHex={selectedHex}
         onSelect={(plane: Aircraft) => onSelect({ kind: "aircraft", data: plane })}
       />
       <AirportsLayer

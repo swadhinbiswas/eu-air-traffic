@@ -100,6 +100,9 @@ export function WeatherLayer({ stations, visible, onSelect }: WeatherLayerProps)
         id: LABEL_LAYER,
         type: "symbol",
         source: SOURCE_ID,
+        // Labels only at regional zoom: 400 colliding labels at world scale are
+        // unreadable anyway and cost a full collision pass every frame.
+        minzoom: 5,
         layout: {
           visibility: visible ? "visible" : "none",
           "text-field": ["get", "label"],
@@ -107,7 +110,8 @@ export function WeatherLayer({ stations, visible, onSelect }: WeatherLayerProps)
           "text-size": 10,
           "text-offset": [0, -1.1],
           "text-anchor": "bottom",
-          "text-allow-overlap": false,
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
         } as never,
         paint: {
           "text-color": CATEGORY_COLOR_EXPR as never,
