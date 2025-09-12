@@ -12,6 +12,11 @@ concurrency:
   group: lake
   cancel-in-progress: false # never overlap: one consumer group, one DuckDB writer
 
+# Needed so the failure job can open an issue.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   lake:
     name: Drain Kafka → Bronze → Silver → Gold
@@ -22,14 +27,16 @@ jobs:
       AIVEN_KAFKA_PORT: ${{ secrets.AIVEN_KAFKA_PORT }}
       AIVEN_KAFKA_USERNAME: ${{ secrets.AIVEN_KAFKA_USERNAME }}
       AIVEN_KAFKA_PASSWORD: ${{ secrets.AIVEN_KAFKA_PASSWORD }}
-      AIVEN_KAFKA_CA_CERT: ${{ secrets.AIVEN_KAFKA_CA_CERT }}
       KAFKA_SECURITY_PROTOCOL: ${{ vars.KAFKA_SECURITY_PROTOCOL || 'SASL_SSL' }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_REPO: ${{ secrets.HF_REPO }}
+      HF_REPO: ${{ vars.HF_REPO || secrets.HF_REPO }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       MOTHERDUCK_DATABASE: ${{ vars.MOTHERDUCK_DATABASE || 'my_db' }}
       WAREHOUSE_TARGET: local
       DBT_TARGET: dev
+      # Absolute path: dbt resolves relative paths from the process cwd, which is
+      # the repo root here, not the project dir.
+      AIR_TRAFFIC_DUCKDB_PATH: ${{ github.workspace }}/warehouse/air_traffic.duckdb
       # Follow the log for at most 7 minutes; the next job starts at 9.
       LAKE_WINDOW_SECONDS: "420"
     steps:
@@ -45,6 +52,19 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev --extra stream
+
+      - name: Materialise the Kafka CA certificate
+        # The PEM lives in a secret as text; the client expects a file path.
+        env:
+          CA_PEM: ${{ secrets.AIVEN_KAFKA_CA_PEM }}
+        run: |
+          if [ -n "$CA_PEM" ]; then
+            printf '%s\n' "$CA_PEM" > "$RUNNER_TEMP/aiven-ca.pem"
+            echo "AIVEN_KAFKA_CA_CERT=$RUNNER_TEMP/aiven-ca.pem" >> "$GITHUB_ENV"
+            echo "CA certificate written."
+          else
+            echo "No CA certificate secret set — using the system trust store."
+          fi
 
       - name: Pull existing Silver from Hugging Face
         # Incremental Silver appends to the previous layer, so it must be present.
@@ -91,6 +111,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lake
     if: failure()
+    permissions:
+      issues: write
     steps:
       - uses: actions/github-script@v7
         with:
