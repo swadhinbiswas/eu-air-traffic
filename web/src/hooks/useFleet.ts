@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { loadBundle, tryLiveApi } from "../lib/bundle";
+import { LIVE_BASE, liveGatewayConfigured, loadBundle, tryLiveApi } from "../lib/bundle";
 import type { LiveSnapshot, Position } from "../lib/bundle";
 import {
   advance,
@@ -37,6 +37,17 @@ export function useFleet(): FleetState {
   const baseRef = useRef<Aircraft[]>([]);
   const baseTimeRef = useRef<number>(Date.now());
   const lastLiveRef = useRef<number>(0);
+  const warnedRef = useRef(false);
+
+  // Explain an offline feed once, in the console, with the actionable cause.
+  useEffect(() => {
+    if (!liveGatewayConfigured()) {
+      console.warn(
+        "[live] VITE_LIVE_URL is not set in this build — no live feed. " +
+          "Set it (e.g. https://live.example.com) and rebuild; Vite inlines env at build time."
+      );
+    }
+  }, []);
 
   // Seed immediately from the static bundle.
   useEffect(() => {
@@ -78,6 +89,18 @@ export function useFleet(): FleetState {
       }
       if (alive && Date.now() - lastLiveRef.current > 25_000) {
         setState((s) => ({ ...s, status: "snapshot", error: null }));
+        if (!warnedRef.current && liveGatewayConfigured()) {
+          warnedRef.current = true;
+          const securePage = window.location.protocol === "https:";
+          const insecureApi = LIVE_BASE.startsWith("http://");
+          console.warn(
+            `[live] no snapshot from ${LIVE_BASE}/live/snapshot.` +
+              (securePage && insecureApi
+                ? " This page is HTTPS but the API is HTTP — the browser blocks mixed content. " +
+                  "Serve the API over HTTPS (Cloudflare Tunnel / Caddy) and rebuild with that URL."
+                : " Check the collector is reachable from this browser and that the URL is correct.")
+          );
+        }
       }
     }
 
