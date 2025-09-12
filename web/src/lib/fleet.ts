@@ -38,6 +38,8 @@ export interface Aircraft {
   fuelBurnKgPerHour: number | null;
   source: string;
   seen: number | null;
+  /** Epoch ms of the position fix this record came from (dead-reckoning anchor). */
+  fixMs: number;
 }
 
 export type FleetSource = "live" | "api" | "snapshot";
@@ -102,6 +104,7 @@ export function fromLive(l: LiveAircraft): Aircraft {
     fuelBurnKgPerHour: null,
     source: l.mlat ? "mlat" : "adsb",
     seen: l.seen,
+    fixMs: Date.now(),
   };
 }
 
@@ -144,6 +147,7 @@ export function fromSnapshot(p: Position): Aircraft {
     fuelBurnKgPerHour: null,
     source: p.source ?? "snapshot",
     seen: null,
+    fixMs: Date.now(),
   };
 }
 
@@ -190,6 +194,7 @@ export function fromApi(row: Record<string, unknown>): Aircraft {
     fuelBurnKgPerHour: null,
     source: String(row.source ?? "api"),
     seen: null,
+    fixMs: Date.now(),
   };
 }
 
@@ -234,6 +239,7 @@ export function fromCanonical(c: CanonicalAircraft): Aircraft {
     fuelBurnKgPerHour: num(c.fuel_burn_kg_per_hour),
     source: c.source ?? "adsb",
     seen: null,
+    fixMs: c.collected_at ? Date.parse(c.collected_at) || Date.now() : Date.now(),
   };
 }
 
