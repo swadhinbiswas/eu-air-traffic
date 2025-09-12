@@ -10,7 +10,7 @@ import {
   type Story,
   type BundleManifest,
 } from "../lib/bundle";
-import type { BatchFreshness } from "../lib/motherduckData";
+import type { BatchFreshness } from "../lib/tursoData";
 
 /**
  * Load a dashboard dataset at runtime (warehouse API / collector), refreshing

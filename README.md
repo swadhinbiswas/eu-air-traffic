@@ -87,7 +87,7 @@ A production-grade React dashboard (`web/`) inspired by [gods-eye-view](https://
 | **Ops** | Pipeline steps, data-quality pass rates per source, quarantine counts and live stream health |
 | **Docs** | Medallion architecture, model catalogue, data sources and business glossary |
 
-**Hybrid data model.** The dashboard fetches its data at runtime — Gold analytics straight from MotherDuck in the browser (read-only token), live aircraft/weather from the VPS snapshot API. There is no build-time data bundle and no warehouse API in the read path.
+**Hybrid data model.** The dashboard fetches its data at runtime — Gold analytics from **Turso** (libSQL) in the browser using a **read-only token**, live aircraft/weather from the VPS snapshot API. There is no build-time data bundle and no warehouse API in the read path. MotherDuck remains the dbt warehouse; GitHub Actions publishes a derived serving copy to Turso (small tables replaced, the two growing fact tables synced incrementally against a watermark).
 
 ```bash
 make web-data     # regenerate the static bundle from the DuckDB warehouse
@@ -274,7 +274,9 @@ All configuration lives in environment variables (never committed). See `.env.ex
 | `LIVE_API_PUBLIC_URL` | – | Public URL the dashboard is built against |
 | `HF_TOKEN` / `HF_REPO` | – | Hugging Face dataset (Bronze/Silver lake) |
 | `HF_BRONZE_PREFIX` / `HF_SILVER_PREFIX` | `bronze` / `silver` | Lake path prefixes |
-| `MOTHERDUCK_TOKEN` / `MOTHERDUCK_DATABASE` | – / `air_traffic` | Gold serving layer |
+| `MOTHERDUCK_TOKEN` / `MOTHERDUCK_DATABASE` | – / `air_traffic` | Gold warehouse (dbt target) |
+| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | – | Turso serving copy (written by Actions) |
+| `VITE_TURSO_URL` / `VITE_TURSO_TOKEN` | – | Site read path; token must be **read-only** |
 | `MOTHERDUCK_PG_URL` | – | Postgres-wire endpoint for BI/psql (same token as password) |
 | `WAREHOUSE_TARGET` | `local` | Build target: `local` (reproducible) or `motherduck` |
 | `DBT_TARGET` | `dev` | `dev` (local DuckDB) or `motherduck` |
@@ -474,6 +476,7 @@ make verify     # ruff check + ruff format + mypy + pytest (with coverage gate)
 2. Bronze Parquet → incremental Silver transform
 3. Push Silver to the Hugging Face dataset
 4. Build the star schema, `dbt build`, register `gold_*`, publish to MotherDuck
+5. Publish the site tables + serving copy to Turso (read-only token for the web)
 
 **Bundle** (`.github/workflows/bundle.yml`) — hourly:
 1. Build the offline HTML dashboard and the static JSON bundle from Silver

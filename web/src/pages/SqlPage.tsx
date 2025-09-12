@@ -1,22 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Loader2, Play, RotateCw, Terminal } from "lucide-react";
 import { Panel, SectionHeader } from "@/components/shared";
-import {
-  engineAvailable,
-  listTables,
-  liveTables,
-  resetEngine,
-  runSql,
-  runSqlLive,
-  type SqlEngineKind,
-  type SqlRow,
-} from "@/lib/duckdb";
-import {
-  listMotherDuckTables,
-  motherduckConfigured,
-  resetMotherDuck,
-  runMotherDuck,
-} from "@/lib/motherduck";
+import { liveTables, runSqlLive, type SqlRow } from "@/lib/warehouseApi";
+import { tursoConfigured, tursoQuery, tursoTables } from "@/lib/turso";
+
+type SqlEngineKind = "turso" | "live";
 import { API_BASE } from "@/lib/bundle";
 import { nf } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -55,7 +43,7 @@ function toCsv(rows: SqlRow[], columns: string[]): string {
 export function SqlPage() {
   const [tables, setTables] = useState<string[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [engine, setEngine] = useState<SqlEngineKind | "motherduck">("motherduck");
+  const [engine, setEngine] = useState<SqlEngineKind>("turso");
   const [error, setError] = useState<string | null>(null);
   const [sql, setSql] = useState(EXAMPLES[0].sql);
   const [rows, setRows] = useState<SqlRow[]>([]);
@@ -67,26 +55,23 @@ export function SqlPage() {
     setStatus("loading");
     setError(null);
 
-    // Gold layer straight from MotherDuck — no warehouse API, no bundle.
-    let mdError: string | null = null;
-    if (motherduckConfigured()) {
+    // Gold analytics live in Turso and are queried with a read-only token.
+    let primaryError: string | null = null;
+    if (tursoConfigured()) {
       try {
-        const mdTables = await listMotherDuckTables();
-        setEngine("motherduck");
-        setTables(mdTables);
+        setEngine("turso");
+        setTables(await tursoTables());
         setStatus("ready");
         return;
       } catch (e: unknown) {
-        resetMotherDuck().catch(() => undefined);
-        mdError =
+        primaryError =
           e instanceof Error
-            ? `MotherDuck: ${e.message} (check VITE_MOTHERDUCK_TOKEN)`
-            : "MotherDuck connection failed";
+            ? `Turso: ${e.message} (check VITE_TURSO_URL / VITE_TURSO_TOKEN)`
+            : "Turso connection failed";
       }
     }
 
-    // Prefer the native FastAPI + DuckDB backend when one is configured and
-    // reachable — it queries the full warehouse with no WASM download.
+    // Optional: a native FastAPI warehouse API, when one is deployed.
     if (API_BASE) {
       try {
         const live = await liveTables();
@@ -95,38 +80,15 @@ export function SqlPage() {
         setStatus("ready");
         return;
       } catch {
-        /* fall through to the in-browser engine */
+        /* fall through to the error below */
       }
     }
 
-    if (!engineAvailable()) {
-      setStatus("error");
-      setError("WebAssembly/Worker unavailable in this browser.");
-      return;
-    }
-    resetEngine();
-
-    let timedOut = false;
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        timedOut = true;
-        reject(
-          new Error(
-            "Timed out starting the in-browser DuckDB engine. The ~36 MB WASM runtime is loaded from the jsDelivr CDN on first use — check your connection and retry."
-          )
-        );
-      }, 60000)
+    setStatus("error");
+    setError(
+      primaryError ??
+        "No SQL engine configured. Set VITE_TURSO_URL and VITE_TURSO_TOKEN at build time."
     );
-    try {
-      const t = await Promise.race([listTables(), timeout]);
-      setEngine("wasm");
-      setTables(t);
-      setStatus("ready");
-    } catch (e: unknown) {
-      if (timedOut) resetEngine();
-      setStatus("error");
-      setError(mdError ?? (e instanceof Error ? e.message : "Failed to initialise DuckDB-WASM"));
-    }
   }, []);
 
   useEffect(() => {
@@ -141,11 +103,7 @@ export function SqlPage() {
       setError(null);
       try {
         const result =
-          engine === "motherduck"
-            ? await runMotherDuck(text)
-            : engine === "live"
-              ? await runSqlLive(text)
-              : await runSql(text);
+          engine === "turso" ? await tursoQuery(text) : await runSqlLive(text);
         setRows(result.rows);
         setColumns(result.columns);
         setMs(result.ms);
@@ -177,7 +135,7 @@ export function SqlPage() {
       <SectionHeader
         icon={<Terminal className="h-4 w-4" />}
         title="SQL Explorer"
-        subtitle="Query the Gold layer in MotherDuck directly — no API, no bundle"
+        subtitle="Query the Gold layer in Turso directly with a read-only token"
         right={
           <span
             className={cn(
@@ -190,7 +148,7 @@ export function SqlPage() {
           >
             {status === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
             {status === "ready"
-              ? `${engine === "motherduck" ? "motherduck" : engine === "live" ? "backend" : "wasm"} engine · ${tables.length} tables`
+              ? `${engine} engine · ${tables.length} tables`
               : status}
           </span>
         }

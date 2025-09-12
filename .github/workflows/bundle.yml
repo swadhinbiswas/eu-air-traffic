@@ -37,10 +37,11 @@ jobs:
           # Where the deployed site reads data at runtime.
           VITE_LIVE_URL: ${{ vars.VITE_LIVE_URL }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
-          # Gold analytics are read straight from MotherDuck in the browser.
-          # This MUST be a read-only token — it is inlined into the JS bundle.
-          VITE_MOTHERDUCK_TOKEN: ${{ secrets.VITE_MOTHERDUCK_TOKEN }}
-          VITE_MOTHERDUCK_DATABASE: ${{ vars.MOTHERDUCK_DATABASE || 'my_db' }}
+          # Gold analytics are read straight from Turso in the browser.
+          # VITE_TURSO_TOKEN MUST be a read-only Turso token — it is inlined
+          # into the JS bundle and visible to anyone.
+          VITE_TURSO_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          VITE_TURSO_TOKEN: ${{ secrets.VITE_TURSO_TOKEN }}
         run: npm ci && npm run build
 
       - name: Upload dashboard artifact
