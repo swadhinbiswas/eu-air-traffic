@@ -327,7 +327,8 @@ async function fetchWithTimeout<T>(url: string, timeoutMs: number): Promise<T | 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    // Live and analytics endpoints must never be served from the HTTP cache.
+    const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
