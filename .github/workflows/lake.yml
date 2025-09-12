@@ -1,11 +1,14 @@
 name: Lake (Kafka → Silver → Gold)
 
-# The VPS collector publishes to Kafka 24/7. Every 9 minutes this job drains the
-# records accumulated since the previous run (Kafka consumer offset, not a query
-# time-window), builds Silver, then dbt Gold → MotherDuck.
+# The VPS collector publishes to Kafka 24/7. Every 9 minutes — and on every push
+# to main — this job drains the records accumulated since the previous run
+# (Kafka consumer offset, not a query time-window), builds Silver, then dbt Gold
+# → MotherDuck → Turso.
 on:
   schedule:
     - cron: "*/9 * * * *" # every 9 minutes
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
