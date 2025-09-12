@@ -198,14 +198,14 @@ class PositionsSource(Source):
         return by_hex, failed
 
     def _fetch_opensky(self) -> list[dict[str, Any]]:
-        auth = None
-        if self.settings.opensky_username and self.settings.opensky_password:
-            auth = (self.settings.opensky_username, self.settings.opensky_password)
+        from services.opensky_auth import auth_for
+
+        extra_headers, auth = auth_for(self.settings)
         try:
             res = self._session.get(
                 f"{OPENSKY}/states/all",
                 params=OPENSKY_BBOX,
-                headers=HEADERS,
+                headers={**HEADERS, **extra_headers},
                 auth=auth,
                 timeout=self.settings.request_timeout_seconds,
             )
