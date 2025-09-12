@@ -364,6 +364,45 @@ has no effect until you rebuild. In GitHub Actions, set the repository variable
 `VITE_LIVE_URL` (Settings → Secrets and variables → Actions → Variables) and
 re-run the `Frontend` workflow.
 
+### Deploy the dashboard (Cloudflare Pages)
+
+`VITE_*` values are inlined by Vite, so **they must exist when the build runs** —
+setting them on Cloudflare only works if Cloudflare performs the build.
+
+**Git-connected project** (Cloudflare builds it) — Pages → project → Settings:
+
+| Setting | Value |
+|---|---|
+| Root directory | *(repo root)* |
+| Build command | `cd web && npm ci && npm run build` |
+| Build output directory | `web/dist` |
+
+Environment variables (Production **and** Preview), then **Retry deployment**:
+
+| Variable | Value |
+|---|---|
+| `VITE_LIVE_URL` | `https://vps.example.com` |
+| `VITE_TURSO_URL` | `libsql://<db>-<org>.turso.io` |
+| `VITE_TURSO_TOKEN` | a **read-only** Turso token (it is public in the bundle) |
+| `VITE_API_URL` | optional FastAPI warehouse API |
+
+**Direct upload** (no Cloudflare build) — cloud env vars do nothing; build first,
+then deploy. The `Frontend` workflow already has the secrets:
+
+```bash
+gh run download -n web-dashboard -D /tmp/web-dist
+npx wrangler pages deploy /tmp/web-dist   # wrangler.toml names the project
+```
+
+Verify the variables are actually baked in:
+
+```bash
+curl -s https://<project>.pages.dev/ | grep -o '/assets/index-[^"]*\.js' | head -1
+curl -s "https://<project>.pages.dev/assets/index-XXXX.js" | grep -c "turso.io"
+```
+
+Non-zero means the bundle has the URL and the dashboard can reach Turso.
+
 ### Docker Compose
 
 ```bash
