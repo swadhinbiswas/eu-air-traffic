@@ -8,6 +8,7 @@ for Kafka and the live snapshot. Source names match the Kafka topic keys in
 
 from __future__ import annotations
 
+from services.sources.airlabs import AirlabsSource
 from services.sources.base import Source
 from services.sources.flights import FlightsSource
 from services.sources.forecast import ForecastSource
@@ -20,6 +21,7 @@ __all__ = [
     "Source",
     "PositionsSource",
     "FlightsSource",
+    "AirlabsSource",
     "MetarSource",
     "TafSource",
     "ForecastSource",
@@ -31,7 +33,8 @@ __all__ = [
 
 def build_sources(app_settings=None) -> list[Source]:
     """Instantiate the full VPS collector source set."""
-    return [
+    settings_obj = app_settings
+    sources: list[Source] = [
         PositionsSource(app_settings),
         FlightsSource(app_settings),
         MetarSource(app_settings),
@@ -40,3 +43,9 @@ def build_sources(app_settings=None) -> list[Source]:
         FuelSource(app_settings),
         ReferenceSource(app_settings),
     ]
+    # Only run the AirLabs loop when a key is configured — it is budgeted.
+    from config.settings import settings as global_settings
+
+    if (settings_obj or global_settings).airlabs_api_key:
+        sources.append(AirlabsSource(app_settings))
+    return sources
