@@ -42,6 +42,7 @@ _FACT_FLIGHTS_COLUMNS = (
     "cancelled",
     "source",
     "ingestion_date",
+    "collected_at",
 )
 _EMPTY_FACT_FLIGHTS = {
     "flight_id": "VARCHAR",
@@ -58,6 +59,7 @@ _EMPTY_FACT_FLIGHTS = {
     "cancelled": "BOOLEAN",
     "source": "VARCHAR",
     "ingestion_date": "VARCHAR",
+    "collected_at": "VARCHAR",
 }
 
 _FACT_EMISSIONS_COLUMNS = (
@@ -389,6 +391,15 @@ class WarehouseBuilder:
             self._create_or_replace_empty("fact_flights", _EMPTY_FACT_FLIGHTS)
             return
         fact = _ensure_columns(flights, _FACT_FLIGHTS_COLUMNS, {"delay_minutes"}, {"cancelled"})
+        if "collected_at" in fact.columns:
+            # Live rows have no ingestion_date; the serving watermark and the
+            # freshness report both need one.
+            fact = fact.with_columns(
+                pl.coalesce(
+                    pl.col("ingestion_date"),
+                    pl.col("collected_at").cast(pl.Utf8).str.slice(0, 10),
+                ).alias("ingestion_date")
+            )
         self._load_replace("fact_flights", fact)
         logger.info("[warehouse] fact_flights rows=%s", fact.height)
 

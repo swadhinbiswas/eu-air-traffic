@@ -115,7 +115,7 @@ def test_incremental_sync_only_adds_new_rows(tmp_path):
     try:
         assert con.execute("SELECT COUNT(*) FROM fact_flights").rows[0][0] == 3
         state = dict(con.execute("SELECT table_name, watermark FROM _sync_state").rows)
-        assert int(state["fact_flights"]) > 0
+        assert int(state["fact_flights"].removeprefix("wm:")) > 0
     finally:
         con.close()
 
@@ -126,7 +126,8 @@ def test_row_update_is_upserted_not_duplicated(tmp_path):
     # The same flight id, landing later: must replace, not duplicate.
     src.execute(
         "UPDATE fact_flights SET actual_arrival = TIMESTAMPTZ '2026-01-01 13:30:00+00', "
-        "delay_minutes = 42.0 WHERE flight_id = 'f1'"
+        "delay_minutes = 42.0, collected_at = TIMESTAMPTZ '2026-01-01 11:30:00+00' "
+        "WHERE flight_id = 'f1'"
     )
     src.close()
 
@@ -167,3 +168,18 @@ def test_http_client_builds_pipeline_endpoint():
         assert client._endpoint == "https://db.turso.io/v2/pipeline"
     finally:
         client.close()
+
+
+def test_unchanged_static_tables_are_reuploaded_only_on_change(tmp_path):
+    from scripts.publish_turso import STATIC_REFRESH_SECONDS
+
+    counts, target, source = _run(tmp_path)
+    assert counts.get("dim_airport") == 1
+
+    # Second run: identical content, so no static table may be rewritten.
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    counts = publisher.run()
+    assert "dim_airport" not in counts
+    assert "gold_airport_metrics" not in counts
+    # Positions are the deliberate exception: capped, not skipped forever.
+    assert STATIC_REFRESH_SECONDS.get("fact_positions", 0) > 0
