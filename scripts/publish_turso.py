@@ -64,15 +64,17 @@ GROWING_TABLES: dict[str, tuple[tuple[str, ...], str]] = {
     "weather": (("station_icao", "timestamp"), "timestamp"),
 }
 BATCH_SIZE = 400
-MAX_ROWS_PER_SYNC = 250_000
+MAX_ROWS_PER_SYNC = 20_000
 # Static tables upload only when their content hash changes. Positions move
 # every cycle, so their refresh is capped to protect the free write budget.
 STATIC_REFRESH_SECONDS: dict[str, int] = {"fact_positions": 900}
 # When a growing table is recreated after a schema change it must be re-seeded;
 # the old watermark points past rows that no longer exist.
 GROWING_RESET_LOOKBACK_MS: dict[str, int] = {
-    "fact_flights": 7 * 24 * 3_600_000,
-    "weather": 24 * 3_600_000,
+    # Keep re-seeds bounded: Turso's HTTP write path is slow (hundreds of rows
+    # per second), so a week of flights is a multi-minute step.
+    "fact_flights": 24 * 3_600_000,
+    "weather": 12 * 3_600_000,
 }
 
 
