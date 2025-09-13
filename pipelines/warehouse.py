@@ -425,8 +425,7 @@ class WarehouseBuilder:
             # window comparison and keep the original column untouched.
             fact = fact.with_columns(
                 pl.col("collected_at")
-                .str.to_datetime(strict=False)
-                .dt.replace_time_zone("UTC")
+                .str.to_datetime(strict=False, time_zone="UTC")
                 .alias("_seen_at")
             )
             cutoff = fact["_seen_at"].max()

@@ -17,8 +17,10 @@ renamed as (
         actual_departure,
         actual_arrival,
         status,
-        coalesce(delay_minutes, 0) as delay_minutes,
-        cancelled,
+        -- NULL means "no schedule was available" (OpenSky movements), which is
+        -- different from "on time". Punctuality averages must ignore it.
+        delay_minutes,
+        coalesce(cancelled, false) as cancelled,
         source as data_source,
         ingestion_date
     from source

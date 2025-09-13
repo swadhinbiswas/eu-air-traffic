@@ -12,7 +12,7 @@ airport_metrics as (
         count(*) as total_flights,
         round(avg(delay_minutes), 2) as avg_delay_minutes,
         max(delay_minutes) as max_delay_minutes,
-        round(avg(case when is_on_time then 1.0 else 0.0 end), 4) as on_time_rate,
+        round(avg(case when is_on_time is null then null when is_on_time then 1.0 else 0.0 end), 4) as on_time_rate,
         sum(case when status = 'cancelled' then 1 else 0 end) as cancelled_flights,
         round(avg(flight_duration_minutes), 1) as avg_flight_duration_min
     from flight_details

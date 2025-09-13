@@ -280,6 +280,8 @@ def test_flights_source_queries_both_directions(monkeypatch) -> None:
     assert by_id["aaa111_100"]["departure_icao"] == "EDDF"
     assert by_id["aaa111_100"]["arrival_icao"] is None
     assert by_id["aaa111_100"]["status"] == "en-route"
+    # OpenSky has no schedule: delay unknown, never a fake zero.
+    assert by_id["aaa111_100"]["delay_minutes"] is None
     assert by_id["bbb222_300"]["arrival_icao"] == "EDDF"
     assert by_id["bbb222_300"]["status"] == "landed"
 
@@ -480,3 +482,15 @@ def test_aircraft_endpoint_enriches_from_position() -> None:
     assert body["operator"] == "Lufthansa"  # resolved from the DLH callsign
     assert body["type"] == "A320"
     assert body["aircraftClass"] == "passenger"
+
+
+def test_reference_reads_the_committed_network() -> None:
+    """The reference loader must find services/data, not fall back to synthetic."""
+    from ingestion import reference
+
+    routes = reference.routes() or []
+    assert len(routes) > 1_000, "real OpenFlights route network not loaded"
+    assert (
+        reference.route_distance_km("EDDF", "EGLL")
+        and reference.route_distance_km("EDDF", "EGLL") > 600
+    )
