@@ -109,7 +109,9 @@ class AirlabsSource(Source):
     def _save_state(self, state: dict[str, Any]) -> None:
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            self._state_path.write_text(json.dumps(state), encoding="utf-8")
+            temp = self._state_path.with_suffix(".tmp")
+            temp.write_text(json.dumps(state), encoding="utf-8")
+            temp.replace(self._state_path)  # atomic: a crash cannot zero the counter
         except OSError as exc:
             logger.warning("[airlabs] could not persist budget state: %s", exc)
 

@@ -12,6 +12,7 @@ job still produces the static bundle.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,8 @@ def publish(local_path: Path | None = None) -> int:
     """Copy every local schema/table to MotherDuck. Returns tables published."""
     s = settings
     if not s.motherduck_enabled:
+        if os.environ.get("MOTHERDUCK_TOKEN", "unset") == "":
+            raise RuntimeError("[motherduck] MOTHERDUCK_TOKEN is set but empty — fix the secret")
         logger.warning("[motherduck] MOTHERDUCK_TOKEN not set — skipping publish")
         return 0
 

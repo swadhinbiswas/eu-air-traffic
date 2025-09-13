@@ -435,6 +435,10 @@ class TursoPublisher:
         from scripts.publish_site_tables import build_site_payloads, write_site_tables_local
 
         if not self.url:
+            import os
+
+            if os.environ.get("TURSO_DATABASE_URL", "unset") == "":
+                raise RuntimeError("[turso] TURSO_DATABASE_URL is set but empty — fix the secret")
             logger.warning("[turso] TURSO_DATABASE_URL not set — skipping")
             return {}
         if not self.db_path.exists():
