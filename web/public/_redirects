@@ -1,3 +1,8 @@
-# Single-page app: every client-side route falls back to index.html, otherwise
-# a deep link like /map 404s on a static host.
+# Vite bundles are content-hashed; a missing /assets file means a stale
+# index.html (old tab or cache), not a route. Answer a real 404 instead of
+# the SPA fallback, so the browser fails fast instead of complaining that an
+# HTML page is not a JavaScript module.
+/assets/*    /404.html    404
+
+# Single-page app: every client-side route falls back to index.html.
 /*    /index.html   200
