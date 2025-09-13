@@ -99,6 +99,9 @@ jobs:
       - name: Publish Gold to MotherDuck
         run: uv run python -m scripts.publish_motherduck
 
+      - name: Quality report (Ops page source)
+        run: uv run python -m pipelines.quality
+
       - name: Publish site tables (stories, ops, lineage) to MotherDuck
         run: uv run python -m scripts.publish_site_tables
 
@@ -124,9 +127,22 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🚨 Lake pipeline failed — ${new Date().toISOString()}`,
-              body: `The Kafka → Silver → Gold job failed. See the workflow run.`,
+            const title = "🚨 Lake pipeline failed";
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", per_page: 100,
             });
+            const existing = open.data.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Still failing: ${run} (${new Date().toISOString()})`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title,
+                body: `The Kafka → Silver → Gold job failed. See ${run}.`,
+              });
+            }

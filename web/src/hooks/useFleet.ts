@@ -91,7 +91,7 @@ export function useFleet(): FleetState {
     let alive = true;
 
     async function poll() {
-      const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot");
+      const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot?slim=1");
       if (alive && snap?.positions?.length) {
         const seen = new Set<string>();
         for (const canonical of snap.positions) {

@@ -36,7 +36,7 @@ export function useLiveWeather(): LiveWeatherState {
       .catch(() => undefined);
 
     async function poll() {
-      const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot");
+      const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot?slim=1");
       if (alive && snap?.weather?.metar?.length) {
         setState({
           stations: snap.weather.metar.map(fromSnapshotMetar),

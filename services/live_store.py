@@ -173,7 +173,7 @@ class LiveStore:
             "by_type": ranked,
         }
 
-    def snapshot(self, max_age_seconds: float = 120.0) -> dict[str, Any]:
+    def snapshot(self, max_age_seconds: float = 120.0, slim: bool = False) -> dict[str, Any]:
         """Full live payload for the dashboard's single endpoint."""
         # Drop aircraft not seen within the freshness window so the map never
         # shows "ghost" contacts from many minutes ago.
@@ -204,16 +204,19 @@ class LiveStore:
             },
             "updatedAt": updated,
             "positions": positions,
-            "flights": flights,
-            "weather": {"metar": metar, "taf": taf, "forecast": forecast},
-            "fuel": fuel,
+            # slim: the dashboard's hot poll needs positions, weather and the
+            # map's airport/aircraft markers — not 24k routes or movement lists
+            # it fetches on demand.
+            "flights": [] if slim else flights,
+            "weather": {"metar": metar, "taf": [] if slim else taf, "forecast": forecast},
+            "fuel": [] if slim else fuel,
             "airspace": summarise_airspace(positions),
             "reference": {
                 "airports": reference.get("airport", []),
-                "routes": reference.get("route", []),
+                "routes": [] if slim else reference.get("route", []),
                 "aircraft": reference.get("aircraft", []),
                 "emission_factors": reference.get("emission", []),
-                "holidays": reference.get("holiday", []),
+                "holidays": [] if slim else reference.get("holiday", []),
             },
             "emissions": self._emissions_summary(),
         }

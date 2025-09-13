@@ -44,8 +44,8 @@ def create_app(store: LiveStore, app_settings: Settings | None = None) -> FastAP
         response.headers["Pragma"] = "no-cache"
         return response
 
-    def _snapshot() -> dict[str, Any]:
-        return store.snapshot(cfg.live_snapshot_max_age_seconds)
+    def _snapshot(slim: bool = False) -> dict[str, Any]:
+        return store.snapshot(cfg.live_snapshot_max_age_seconds, slim=slim)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
