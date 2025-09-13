@@ -160,3 +160,17 @@ models:
                 values: ['runway_closure', 'taxiway_closure', 'navaid', 'obstacle',
                          'airport_closure', 'fire', 'bird_activity', 'weather',
                          'airspace', 'other']
+
+  - name: stg_eurostat_airport_traffic
+    description: "Eurostat monthly passengers per airport (official benchmark)"
+    columns:
+      - name: period_start
+        tests:
+          - not_null
+      - name: airport_icao
+        tests:
+          - not_null
+      - name: passengers
+        tests:
+          - not_null
+

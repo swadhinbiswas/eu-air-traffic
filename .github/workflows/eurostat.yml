@@ -1,0 +1,46 @@
+name: Eurostat benchmark (monthly)
+
+# Official monthly passengers per EU airport, published ~2 months behind. One
+# request per month of the window; the parquet is committed so every lake run
+# and dbt build sees it without another download.
+on:
+  schedule:
+    - cron: "0 4 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eurostat
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    name: Fetch Eurostat airport traffic
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Fetch
+        run: uv run python -m scripts.fetch_eurostat
+
+      - name: Commit the benchmark file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add services/data/eurostat_airport_traffic.parquet
+          git diff --cached --quiet || git commit -m "chore: monthly Eurostat airport traffic"
+          git push

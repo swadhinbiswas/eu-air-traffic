@@ -51,6 +51,7 @@ STATIC_TABLES = (
     "gold_seasonal_trends",
     "gold_fuel_price_series",
     "gold_aircraft_class_mix",
+    "gold_airport_official_traffic",
     "site_stories",
     "site_ops",
     "site_lineage",
