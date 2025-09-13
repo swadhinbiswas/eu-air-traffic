@@ -175,6 +175,39 @@ function layerFor(name: string): string {
   return "raw";
 }
 
+export interface OfficialTrafficRow {
+  airport_icao: string;
+  airport_name: string | null;
+  passengers_12m: number | null;
+  passengers_ytd: number | null;
+  latest_month: string | null;
+  official_rank: number;
+  observed_flights: number | null;
+  observed_rank: number | null;
+}
+
+/**
+ * Eurostat's official monthly passengers (12-month and YTD) joined to our own
+ * counted movements, so the dashboard can cross-check itself against official
+ * statistics instead of ranking airports on its own data alone.
+ */
+export async function fetchOfficialTraffic(): Promise<OfficialTrafficRow[]> {
+  return rows<OfficialTrafficRow>(`
+    WITH ours AS (
+      SELECT airport_icao, total_flights,
+             ROW_NUMBER() OVER (ORDER BY total_flights DESC) AS observed_rank
+      FROM gold_airport_metrics
+    )
+    SELECT o.airport_icao, o.airport_name, o.passengers_12m, o.passengers_ytd,
+           o.latest_month, o.official_rank,
+           m.total_flights AS observed_flights, m.observed_rank
+    FROM gold_airport_official_traffic o
+    LEFT JOIN ours m ON o.airport_icao = m.airport_icao
+    ORDER BY o.official_rank
+    LIMIT 100
+  `);
+}
+
 export async function fetchCatalog(): Promise<Catalog> {
   const tableRows = await rows<{ name: string; type: string }>(
     "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') " +
