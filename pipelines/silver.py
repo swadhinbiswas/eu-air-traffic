@@ -160,6 +160,16 @@ def transform_flights(df: pl.DataFrame, app_settings: Settings | None = None) ->
     if "cancelled" in df.columns:
         df = df.with_columns(pl.col("cancelled").cast(pl.Boolean).fill_null(False))
 
+    if "status" in df.columns:
+        df = df.with_columns(
+            pl.col("status")
+            .cast(pl.Utf8)
+            .str.strip_chars()
+            .str.to_lowercase()
+            .replace({"en_route": "en-route", "enroute": "en-route", "en route": "en-route"})
+            .alias("status")
+        )
+
     # OpenSky usually knows only one end of a movement: a departure query gives
     # the origin, an arrival query the destination. Require at least one known
     # airport instead of both, and only reject when the two ends agree.

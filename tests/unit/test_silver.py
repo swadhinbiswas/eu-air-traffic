@@ -168,3 +168,16 @@ def test_silver_incremental_only_processes_new_bronze(tmp_path):
 
     out = pl.read_parquet(s.silver_dir / "positions" / "data.parquet")
     assert sorted(out["aircraft_class"].to_list()) == ["cargo", "military", "passenger"]
+
+
+def test_transform_flights_normalises_status_vocabulary():
+    df = pl.DataFrame(
+        {
+            "flight_id": ["A", "B"],
+            "departure_icao": ["EDDF", "EDDF"],
+            "arrival_icao": ["EGLL", "EGLL"],
+            "status": ["en_route", "EN ROUTE"],
+        }
+    )
+    out = transform_flights(df)
+    assert set(out["status"].to_list()) == {"en-route"}
