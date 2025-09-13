@@ -12,10 +12,13 @@ renamed as (
         airline_icao,
         departure_icao,
         arrival_icao,
-        scheduled_departure,
-        scheduled_arrival,
-        actual_departure,
-        actual_arrival,
+        -- Historical Silver rows can hold these as VARCHAR (columns added at
+        -- different times, AirLabs vs OpenSky); marts mix and subtract them,
+        -- so normalise the type here once.
+        try_cast(scheduled_departure as timestamptz) as scheduled_departure,
+        try_cast(scheduled_arrival as timestamptz) as scheduled_arrival,
+        try_cast(actual_departure as timestamptz) as actual_departure,
+        try_cast(actual_arrival as timestamptz) as actual_arrival,
         -- Sources have used en_route/enroute historically; map to one canonical
         -- vocabulary. An unrecognised value becomes NULL rather than a wrong
         -- state.
