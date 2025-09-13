@@ -1,5 +1,9 @@
 
 import * as MapLibreGL from "maplibre-gl";
+// MapLibre resolves its worker relative to its own module URL, which Vite does
+// not emit; without this the browser requests /assets/maplibre-gl-worker.mjs and
+// gets the SPA fallback (HTML) back — a module MIME error and a broken map.
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { PopupOptions, MarkerOptions } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type * as GeoJSON from "geojson";
@@ -20,6 +24,10 @@ import { createPortal } from "react-dom";
 import { X, Minus, Plus, Locate, Maximize, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+if (typeof window !== "undefined") {
+  MapLibreGL.setWorkerUrl(maplibreWorkerUrl);
+}
 
 const defaultStyles = {
   dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
