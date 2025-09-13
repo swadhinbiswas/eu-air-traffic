@@ -19,6 +19,9 @@ class Source(ABC):
 
     name: str = "base"
     key: str = "id"
+    # Where records land in the live store, when that differs from the source
+    # name (AirLabs flights feed the flights section, not a separate one).
+    store_section: str | None = None
 
     def __init__(self, app_settings: Settings | None = None) -> None:
         self.settings = app_settings or settings
