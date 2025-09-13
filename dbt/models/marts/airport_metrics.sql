@@ -16,6 +16,9 @@ airport_metrics as (
         sum(case when status = 'cancelled' then 1 else 0 end) as cancelled_flights,
         round(avg(flight_duration_minutes), 1) as avg_flight_duration_min
     from flight_details
+    -- Arrival-only movements have no departure; they are counted by their
+    -- arrival airport instead of producing a NULL leaderboard row.
+    where departure_icao is not null
     group by departure_icao, departure_airport_name, departure_country
 )
 
