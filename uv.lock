@@ -195,6 +195,9 @@ etl = [
     { name = "pyopensky" },
     { name = "traffic" },
 ]
+openap = [
+    { name = "openap" },
+]
 stream = [
     { name = "kafka-python-ng" },
 ]
@@ -215,6 +218,7 @@ requires-dist = [
     { name = "kafka-python-ng", marker = "extra == 'stream'", specifier = ">=2.2.0" },
     { name = "libsql-client", marker = "extra == 'turso'", specifier = ">=0.3.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
+    { name = "openap", marker = "extra == 'openap'", specifier = ">=2.6.1" },
     { name = "opensky-api", marker = "extra == 'etl'", git = "https://github.com/openskynetwork/opensky-api.git?subdirectory=python" },
     { name = "pandas", specifier = "==2.2.3" },
     { name = "plotly", specifier = ">=5.24.0" },
@@ -234,7 +238,7 @@ requires-dist = [
     { name = "traffic", marker = "extra == 'etl'", specifier = ">=2.13" },
     { name = "uvicorn", specifier = ">=0.30.1" },
 ]
-provides-extras = ["etl", "dev", "stream", "turso"]
+provides-extras = ["etl", "dev", "stream", "turso", "openap"]
 
 [[package]]
 name = "alabaster"
@@ -2619,18 +2623,17 @@ wheels = [
 
 [[package]]
 name = "openap"
-version = "2.6.0"
+version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyyaml" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/3e/ee62c66def7c570d1aec06e6e0e04c46492028d7ae4c135ab24aa8ce4978/openap-2.6.0.tar.gz", hash = "sha256:be47e75c5ade7c56b9476fbf45d506a385ed3abfc2185197da6ee7e20ea8ada3", size = 9410048, upload-time = "2026-07-02T14:42:27.54Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/54/c96e28751e5aade0af4e7f51e7cd7d6acb06a05c1061715d71d92481e0cd/openap-2.6.1.tar.gz", hash = "sha256:c861704a0f487ccdf3dcafb9244e6977971bead3f1aab8aded03e8697eb93d36", size = 10139138, upload-time = "2026-09-11T16:03:00.057Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/b1/4263c069ca2177d9c71d2c19046e2b587b13b6936f22df9e082233b5ec64/openap-2.6.0-py3-none-any.whl", hash = "sha256:aed9a19f232f57744bbe3276e1e044f74f1984dc16a72d00797aa70f54800fab", size = 2699866, upload-time = "2026-07-02T14:42:25.368Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/03/297230e5a126d889aea49b6cec8f6605c1f201909f7f8e95bd7e56a7656e/openap-2.6.1-py3-none-any.whl", hash = "sha256:969222ed90f6f50928376ef4b36ed1052f8ecbca4d7b6cb0a74a087d8aba66d1", size = 2700581, upload-time = "2026-09-11T16:02:58.469Z" },
 ]
 
 [[package]]

@@ -76,11 +76,16 @@ def _store() -> LiveStore:
 
 
 def test_positions_are_enriched_with_emissions() -> None:
+    from services.emissions import _openap
+
     store = _store()
     snapshot = store.snapshot()
-    assert snapshot["positions"][0]["co2_kg_per_hour"] == 5040.0
-    assert snapshot["positions"][0]["fuel_burn_kg_per_hour"] > 0
-    assert snapshot["emissions"]["total_co2_kg_per_hour"] == 5040.0
+    # The fixture flies an A320 at 32,000 ft / 450 kt: the OpenAP grid snaps
+    # that to the 30,000 ft · level · 450 kt cell.
+    kernel = _openap()["types"]["A320"]["flow"][1][6][3]
+    assert snapshot["positions"][0]["fuel_burn_kg_per_hour"] == kernel
+    assert snapshot["positions"][0]["co2_kg_per_hour"] == round(kernel * 2.52, 1)
+    assert snapshot["emissions"]["total_co2_kg_per_hour"] == round(kernel * 2.52, 1)
     assert snapshot["counts"]["airports"] == 1
     assert snapshot["counts"]["routes"] == 1
 
@@ -120,7 +125,10 @@ def test_live_api_endpoints() -> None:
 
     assert client.get("/live/positions").json()["count"] == 1
     assert client.get("/live/weather").json()["metar"][0]["station_icao"] == "EDDF"
-    assert client.get("/live/emissions").json()["total_co2_kg_per_hour"] == 5040.0
+    from services.emissions import _openap
+
+    kernel = _openap()["types"]["A320"]["flow"][1][6][3]
+    assert client.get("/live/emissions").json()["total_co2_kg_per_hour"] == round(kernel * 2.52, 1)
     assert client.get("/live/reference/airports").json()["airports"][0]["icao"] == "EDDF"
     assert client.get("/live/aircraft/ABC123").json()["found"] is True
     assert client.get("/live/aircraft/ZZZZZZ").json()["found"] is False
