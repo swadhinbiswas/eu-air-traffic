@@ -97,6 +97,7 @@ class AirlabsSource(Source):
         default_state = Path(self.settings.warehouse_dir) / "airlabs_state.json"
         self._state_path = Path(state_path or default_state)
         self._iata = _iata_to_icao()
+        self._icao_to_iata = {icao: iata for iata, icao in self._iata.items()}
 
     # ── budget state ──────────────────────────────────────────────────────
     def _load_state(self) -> dict[str, Any]:
@@ -116,13 +117,13 @@ class AirlabsSource(Source):
             logger.warning("[airlabs] could not persist budget state: %s", exc)
 
     # ── fetch ─────────────────────────────────────────────────────────────
-    def _get(self, hub: str) -> list[dict[str, Any]]:
+    def _query(self, key: str, value: str) -> list[dict[str, Any]]:
         try:
             res = self._session.get(
                 AIRLABS,
                 params={
                     "api_key": self.settings.airlabs_api_key,
-                    "dep_icao": hub,
+                    key: value,
                     "limit": 50,
                     "_fields": _FIELDS,
                 },
@@ -130,10 +131,12 @@ class AirlabsSource(Source):
                 timeout=self.settings.request_timeout_seconds,
             )
         except requests.RequestException as exc:
-            logger.debug("[airlabs] %s: %s", hub, exc)
+            logger.debug("[airlabs] %s=%s: %s", key, value, exc)
             return []
         if res.status_code != 200:
-            logger.warning("[airlabs] %s -> HTTP %s %s", hub, res.status_code, res.text[:160])
+            logger.warning(
+                "[airlabs] %s=%s -> HTTP %s %s", key, value, res.status_code, res.text[:160]
+            )
             return []
         try:
             payload = res.json()
@@ -141,6 +144,27 @@ class AirlabsSource(Source):
             return []
         rows = payload.get("response") if isinstance(payload, dict) else payload
         return rows if isinstance(rows, list) else []
+
+    def _get(self, hub: str) -> list[dict[str, Any]]:
+        """Schedules for a hub, by ICAO and falling back to IATA.
+
+        The free key serves IATA fields; querying by ICAO can come back empty,
+        which previously looked like "no flights" and silently starved the
+        delay marts.
+        """
+        rows = self._query("dep_icao", hub)
+        if rows:
+            return rows
+        iata = self._icao_to_iata.get(hub)
+        if iata:
+            rows = self._query("dep_iata", iata)
+            if rows:
+                logger.info(
+                    "[airlabs] %s returned no rows for dep_icao; used dep_iata=%s", hub, iata
+                )
+                return rows
+        logger.warning("[airlabs] %s returned no schedule rows by ICAO or IATA", hub)
+        return []
 
     def _row(self, flight: dict[str, Any], hub: str, collected_at: str) -> dict[str, Any] | None:
         flight_code = str(flight.get("flight_icao") or flight.get("flight_iata") or "").strip()
