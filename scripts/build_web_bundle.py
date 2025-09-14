@@ -702,12 +702,12 @@ def _build_stories(
                 "category": "Delays",
                 "tone": "warning",
                 "title": f"{best['airline_name']} leads on punctuality, {worst['airline_name']} trails",
-                "metric": f"{_pct(best['on_time_rate'])}%",
+                "metric": f"{_pct(_n(best['on_time_rate']))}%",
                 "unit": "best on-time",
                 "narrative": (
-                    f"{best['airline_name']} posts a {_pct(best['on_time_rate'])}% on-time rate versus "
-                    f"{_pct(worst['on_time_rate'])}% for {worst['airline_name']} — a gap of "
-                    f"{round((best['on_time_rate'] - worst['on_time_rate']) * 100, 1)} points."
+                    f"{best['airline_name']} posts a {_pct(_n(best['on_time_rate']))}% on-time rate versus "
+                    f"{_pct(_n(worst['on_time_rate']))}% for {worst['airline_name']} — a gap of "
+                    f"{round((_n(best['on_time_rate']) - _n(worst['on_time_rate'])) * 100, 1)} points."
                 ),
                 "chart": {
                     "type": "bar",
