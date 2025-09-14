@@ -402,6 +402,24 @@ class WarehouseBuilder:
             self._create_or_replace_empty("fact_flights", _EMPTY_FACT_FLIGHTS)
             return
         fact = _ensure_columns(flights, _FACT_FLIGHTS_COLUMNS, {"delay_minutes"}, {"cancelled"})
+        if "status" in fact.columns:
+            fact = fact.with_columns(
+                pl.col("status")
+                .cast(pl.Utf8)
+                .str.strip_chars()
+                .str.to_lowercase()
+                .replace({"en_route": "en-route", "enroute": "en-route", "en route": "en-route"})
+                .alias("status")
+            )
+        if "source" in fact.columns and "delay_minutes" in fact.columns:
+            # OpenSky movements carry no schedule; a historical 0 is not a
+            # measurement and must never reach the serving copy.
+            fact = fact.with_columns(
+                pl.when(pl.col("source") == "opensky")
+                .then(None)
+                .otherwise(pl.col("delay_minutes"))
+                .alias("delay_minutes")
+            )
         if "collected_at" in fact.columns:
             # Live rows have no ingestion_date; the serving watermark and the
             # freshness report both need one.
