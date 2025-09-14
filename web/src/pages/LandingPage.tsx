@@ -379,6 +379,50 @@ export function LandingPage() {
     });
   }, []);
 
+  const searchResults = useMemo(() => {
+    const text = query.trim().toUpperCase();
+    if (text.length < 2) return [];
+    const planes = fleet.aircraft
+      .filter((a) => matchesQuery(a, query))
+      .slice(0, 4)
+      .map((a) => ({
+        kind: "aircraft" as const,
+        key: `ac-${a.hex}`,
+        label: a.callsign || a.hex,
+        sub: a.hex,
+        data: a,
+      }));
+    const aps = (airports ?? [])
+      .filter(
+        (a) =>
+          a.icao.toUpperCase().includes(text) ||
+          (a.name ?? "").toUpperCase().includes(text)
+      )
+      .slice(0, 3)
+      .map((a) => ({
+        kind: "airport" as const,
+        key: `ap-${a.icao}`,
+        label: a.icao,
+        sub: a.name ?? "airport",
+        data: a,
+      }));
+    const stations = weatherState.stations
+      .filter(
+        (w) =>
+          w.icao.toUpperCase().includes(text) ||
+          (w.name ?? "").toUpperCase().includes(text)
+      )
+      .slice(0, 3)
+      .map((w) => ({
+        kind: "weather" as const,
+        key: `wx-${w.icao}`,
+        label: w.icao,
+        sub: w.name ?? "station",
+        data: w,
+      }));
+    return [...planes, ...aps, ...stations];
+  }, [query, fleet.aircraft, airports, weatherState.stations]);
+
   const handleSearch = useCallback(
     (value: string) => {
       setQuery(value);
@@ -503,16 +547,59 @@ export function LandingPage() {
         </div>
       </div>
 
+      {/* Top-right: free-tier notice */}
+      <div
+        className={cn(
+          "pointer-events-none absolute right-4 z-10 max-w-[17rem]",
+          selected ? "top-28" : "top-4"
+        )}
+      >
+        <div className="panel rounded-lg px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+          <span className="mr-1.5 inline-grid h-4 w-4 place-items-center rounded-full border border-amber-500/30 align-middle text-[9px] text-amber-300">
+            i
+          </span>
+          Running on free resources. Depending on your location, the first data chunk may take a
+          little longer to load.
+        </div>
+      </div>
+
       {/* Top-center: search */}
       <div className="pointer-events-none absolute left-1/2 top-4 z-10 w-80 max-w-[80vw] -translate-x-1/2">
-        <div className="pointer-events-auto panel flex items-center gap-2 px-3 py-2">
+        <div className="pointer-events-auto panel relative flex items-center gap-2 px-3 py-2">
           <Search className="h-3.5 w-3.5 text-zinc-500" />
           <input
             value={query}
             onChange={(e) => handleSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchResults[0]) {
+                const first = searchResults[0];
+                setSelected({ kind: first.kind, data: first.data } as MapSelection);
+              }
+              if (e.key === "Escape") setQuery("");
+            }}
+            aria-label="Search callsign, registration, type or airport"
             placeholder="Search callsign, registration, type, airport…"
-            className="w-full bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="w-full bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
+          {searchResults.length > 0 && (
+            <ul className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/90 backdrop-blur-xl">
+              {searchResults.map((r) => (
+                <li key={r.key}>
+                  <button
+                    onClick={() => {
+                      setSelected({ kind: r.kind, data: r.data } as MapSelection);
+                      setQuery("");
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                  >
+                    <span className="mono text-sm text-zinc-100">{r.label}</span>
+                    <span className="truncate text-[11px] text-zinc-500">{r.sub}</span>
+                    <span className="mono flex-none text-[10px] uppercase text-zinc-600">{r.kind}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
