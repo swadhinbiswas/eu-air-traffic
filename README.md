@@ -140,6 +140,9 @@ Tuning knobs (defaults are safe): `POSITIONS_INTERVAL_SECONDS=15`,
   on data/pipeline pushes; drains Kafka, builds Silver, runs dbt, publishes to
   Hugging Face, MotherDuck and Turso.
 - **Eurostat benchmark:** `.github/workflows/eurostat.yml`, monthly.
+- **Reliable cadence:** GitHub's scheduler is best-effort. `deploy/eu-lake-dispatch.{service,timer}`
+  dispatches the lake from the VPS every 15 minutes (skipping when one is already
+  queued), so data keeps arriving even when `schedule` runs late.
 - **Dashboard:** `.github/workflows/bundle.yml` + Cloudflare Pages Git integration.
   Set the four `VITE_*` values in Pages → Settings → Variables and secrets (Production).
 - **Anywhere else:** `docker/lake-job.Dockerfile` + `scripts/run_lake.sh` runs one

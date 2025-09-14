@@ -1,0 +1,8 @@
+[Unit]
+Description=Dispatch the lake workflow on GitHub Actions
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/eu-air-traffic/.env
+ExecStart=/opt/eu-air-traffic/deploy/dispatch-lake.sh
