@@ -142,6 +142,13 @@ class AirlabsSource(Source):
             payload = res.json()
         except ValueError:
             return []
+        if isinstance(payload, dict) and payload.get("error"):
+            # AirLabs answers 200 with an error object for plan/permission and
+            # parameter problems; treating that as "no flights" hid the cause.
+            error = payload["error"]
+            message = error.get("message") if isinstance(error, dict) else str(error)
+            logger.warning("[airlabs] %s=%s rejected: %s", key, value, message)
+            return []
         rows = payload.get("response") if isinstance(payload, dict) else payload
         return rows if isinstance(rows, list) else []
 
