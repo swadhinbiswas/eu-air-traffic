@@ -9,7 +9,12 @@ renamed as (
         flight_id,
         callsign,
         trim(callsign) as callsign_clean,
-        airline_icao,
+        -- OpenSky rows carry no airline code; the callsign prefix is the ICAO
+        -- operator (DLH100 -> DLH), which makes airline rankings complete.
+        coalesce(
+            airline_icao,
+            nullif(left(upper(trim(coalesce(callsign, ''))), 3), '')
+        ) as airline_icao,
         departure_icao,
         arrival_icao,
         -- Historical Silver rows can hold these as VARCHAR (columns added at
