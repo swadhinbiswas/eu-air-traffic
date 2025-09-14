@@ -627,6 +627,14 @@ def _build_weather(app_settings: Settings, airports: list[dict[str, Any]]) -> li
 
 
 # ── stories / insights ──────────────────────────────────────────────────────
+def _n(value: Any) -> float:
+    """Numeric coercion for aggregates that can be NULL (unknown is not zero)."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _build_stories(
     con: duckdb.DuckDBPyConnection | None, live_count: int = 0, live_avg_alt: float = 0.0
 ) -> list[dict[str, Any]]:
@@ -716,9 +724,9 @@ def _build_stories(
             {
                 "id": "delay-burden",
                 "category": "Delays",
-                "tone": "critical" if delayed / total_flights > 0.3 else "warning",
+                "tone": "critical" if _n(delayed) / _n(total_flights) > 0.3 else "warning",
                 "title": "Delay burden across the network",
-                "metric": f"{_pct(delayed / total_flights)}%",
+                "metric": f"{_pct(_n(delayed) / _n(total_flights))}%",
                 "unit": "flights > 15 min late",
                 "narrative": (
                     f"{delayed} of {total_flights} flights arrived more than 15 minutes late; "
