@@ -1,0 +1,5 @@
+# TLS termination for the live API, addressed by SITE_ADDRESS.
+{$SITE_ADDRESS:localhost} {
+	encode gzip
+	reverse_proxy collector:8090
+}

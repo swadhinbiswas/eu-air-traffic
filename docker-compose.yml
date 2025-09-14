@@ -1,0 +1,64 @@
+# Full platform in containers: collector + live API, the lake cycle on a timer,
+# and an optional Caddy TLS front. Point .env at real services (Aiven Kafka,
+# Hugging Face, MotherDuck, Turso) — nothing here needs a local Kafka.
+name: eu-air-traffic
+
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector
+    env_file: .env
+    environment:
+      LIVE_API_HOST: 0.0.0.0
+    volumes:
+      - ./warehouse:/app/warehouse
+      - ./secrets:/app/secrets:ro
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  lake:
+    build:
+      context: .
+      dockerfile: docker/lake-job.Dockerfile
+    env_file: .env
+    environment:
+      # One cycle per interval; the runner keeps its own DuckDB state on disk.
+      LAKE_INTERVAL_SECONDS: ${LAKE_INTERVAL_SECONDS:-900}
+      HF_SYNC: ${HF_SYNC:-1}
+      AIR_TRAFFIC_DUCKDB_PATH: /app/warehouse/air_traffic.duckdb
+    entrypoint:
+      - bash
+      - -c
+      - |
+        while true; do
+          echo "[lake] cycle starting $(date -u +%FT%TZ)"
+          bash scripts/run_lake.sh || echo "[lake] cycle failed — retrying next interval"
+          sleep "$$LAKE_INTERVAL_SECONDS"
+        done
+    volumes:
+      - ./warehouse:/app/warehouse
+      - ./secrets:/app/secrets:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - collector
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
