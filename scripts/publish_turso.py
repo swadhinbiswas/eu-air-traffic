@@ -22,7 +22,7 @@ import hashlib
 import json
 import math
 import time
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -102,6 +102,27 @@ def _value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
     return json.dumps(value, default=str)
+
+
+def _epoch_ms(value: Any) -> int:
+    """Milliseconds since epoch for a datetime, date or ISO-8601 string.
+
+    ``collected_at`` reaches DuckDB as a VARCHAR (Silver keeps the ISO text),
+    while ``timestamp`` is a real TIMESTAMPTZ; the watermark must accept both.
+    """
+    if isinstance(value, datetime):
+        moment = value if value.tzinfo else value.replace(tzinfo=UTC)
+        return int(moment.timestamp() * 1000)
+    if isinstance(value, date):
+        return int(datetime(value.year, value.month, value.day, tzinfo=UTC).timestamp() * 1000)
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return 0
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return int(moment.timestamp() * 1000)
 
 
 class _Rows:
@@ -445,7 +466,7 @@ class TursoPublisher:
             for record in raw
             if record[names.index(watermark_column)] is not None
         )
-        self._set_watermark(table, str(int(peak.timestamp() * 1000)))
+        self._set_watermark(table, str(_epoch_ms(peak)))
         logger.info("[turso] %s: +%s rows (watermark %s)", table, written, peak)
         return written
 
