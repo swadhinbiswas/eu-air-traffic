@@ -24,6 +24,30 @@ export function CatalogPage() {
   const { data: catalog, loading, error } = useCatalog();
   const [selected, setSelected] = useState<string | null>(null);
 
+  const [query, setQuery] = useState("");
+  const [layer, setLayer] = useState("all");
+  type TableMeta = { layer?: string; rows?: number; columns?: Array<{ name?: string; type?: string }> };
+  const filtered = useMemo(() => {
+    if (!catalog) return [];
+    const text = query.trim().toUpperCase();
+    return catalog.tables.filter((t) => {
+      const meta = t as unknown as TableMeta;
+      if (layer !== "all" && (meta.layer ?? "other") !== layer) return false;
+      if (!text) return true;
+      return [t.name, ...(meta.columns ?? []).map((c) => c.name ?? "")]
+        .join(" ")
+        .toUpperCase()
+        .includes(text);
+    });
+  }, [catalog, query, layer]);
+  const layerNames = useMemo(() => {
+    if (!catalog) return ["all"];
+    const found = new Set(
+      catalog.tables.map((t) => (t as unknown as TableMeta).layer ?? "other")
+    );
+    return ["all", ...[...found].sort()];
+  }, [catalog]);
+
   const table = useMemo(() => {
     if (!catalog) return null;
     return catalog.tables.find((t) => t.name === selected) ?? catalog.tables[0] ?? null;
@@ -54,11 +78,36 @@ export function CatalogPage() {
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         <Panel className="max-h-[640px] overflow-y-auto p-0">
-          <div className="sticky top-0 z-10 border-b border-white/5 bg-black/80 px-4 py-3 backdrop-blur">
-            <h2 className="text-sm font-semibold text-zinc-200">Objects</h2>
+          <div className="sticky top-0 z-10 space-y-2 border-b border-white/5 bg-black/85 px-4 py-3 backdrop-blur">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter tables and columns…"
+              aria-label="Filter catalog objects"
+              className="w-full rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-emerald-500/40"
+            />
+            <div className="flex flex-wrap items-center gap-1">
+              {layerNames.map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLayer(l)}
+                  className={cn(
+                    "rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition-colors",
+                    layer === l
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
+              <span className="ml-auto text-[10px] text-zinc-600">
+                {filtered.length}/{catalog.tables.length}
+              </span>
+            </div>
           </div>
           <ul className="divide-y divide-white/[0.03]">
-            {catalog.tables.map((t) => (
+            {filtered.map((t) => (
               <li key={t.name}>
                 <button
                   onClick={() => setSelected(t.name)}
