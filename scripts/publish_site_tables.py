@@ -177,7 +177,7 @@ def main() -> int:
     try:
         publish()
     except Exception as exc:  # noqa: BLE001 - never fail the whole workflow
-        logger.error("[site-tables] publish failed: %s", exc)
+        logger.exception("[site-tables] publish failed: %s", exc)
         return 1
     return 0
 
