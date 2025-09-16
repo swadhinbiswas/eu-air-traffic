@@ -420,7 +420,39 @@ class TursoPublisher:
             swap.append((f'ALTER TABLE "{table}" RENAME TO "{previous}"', None))
         swap.append((f'ALTER TABLE "{shadow}" RENAME TO "{table}"', None))
         swap.append((f'DROP TABLE IF EXISTS "{previous}"', None))
-        self.remote.batch(swap)  # type: ignore[union-attr]
+        try:
+            self.remote.batch(swap)  # type: ignore[union-attr]
+        except Exception as exc:  # noqa: BLE001
+            # sqlite names are global, so anything at all sitting under this
+            # name blocks the rename. The shadow holds a complete copy of the
+            # rows, so clearing the name first cannot lose data, and the object
+            # types are logged in case something unexpected turns up.
+            logger.warning(
+                "[turso] swap of %s hit %s; clearing the name and retrying",
+                table,
+                exc,
+            )
+            logger.warning("[turso] objects named %r: %s", table, self._objects_named(table))
+            self._clear_name(table)
+            self._clear_name(previous)
+            self.remote.batch(  # type: ignore[union-attr]
+                [(f'ALTER TABLE "{shadow}" RENAME TO "{table}"', None)]
+            )
+
+    def _objects_named(self, name: str) -> list[tuple[str, str]]:
+        """Everything in sqlite_master under this exact name (table or index)."""
+        rows = self.remote.execute(
+            "SELECT type, name FROM sqlite_master WHERE name = ?", [name]
+        ).rows
+        return [(str(row[0]), str(row[1])) for row in rows]
+
+    def _clear_name(self, name: str) -> None:
+        """Drop whatever occupies ``name``, whether it is a table or an index."""
+        for kind, object_name in self._objects_named(name):
+            if kind == "index":
+                self.remote.execute(f'DROP INDEX IF EXISTS "{object_name}"')
+            else:
+                self.remote.execute(f'DROP TABLE IF EXISTS "{object_name}"')
 
     def _sync_static(self, table: str) -> int:
         columns = self._columns(table)
