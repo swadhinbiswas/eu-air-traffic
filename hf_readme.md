@@ -206,6 +206,9 @@ MIT — same license as the [eu-air-traffic](https://github.com/swadhinbiswas/eu
 }
 ```
 
+The software that produces this dataset is archived at
+[10.5281/zenodo.22790202](https://doi.org/10.5281/zenodo.22790202) (v0.1.0).
+
 ## Limitations
 
 - OpenSky movements carry no schedule, so delay fields are null there; use AirLabs schedules or Gold delay marts for punctuality.

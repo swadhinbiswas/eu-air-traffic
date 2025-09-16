@@ -119,6 +119,7 @@ def test_external_urls_resolve_to_real_pages():
         assert url.rstrip("}).,") in (
             card.REPO_URL,
             card.GITHUB_URL,
+            card.SOFTWARE_DOI_URL,
         )
 
 

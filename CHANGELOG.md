@@ -68,5 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mercator switch; forecast rows keyed per station-hour instead of collapsing
   to a single hour; flight history bounded by age and size.
 
+Archived on Zenodo: version DOI [10.5281/zenodo.22790202](https://doi.org/10.5281/zenodo.22790202),
+concept DOI [10.5281/zenodo.22790201](https://doi.org/10.5281/zenodo.22790201).
+
 [Unreleased]: https://github.com/swadhinbiswas/eu-air-traffic/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/swadhinbiswas/eu-air-traffic/releases/tag/v0.1.0

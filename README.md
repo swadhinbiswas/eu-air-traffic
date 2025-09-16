@@ -7,6 +7,7 @@
 [![CI](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml)
 [![Lake](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/1319510254.svg)](https://doi.org/10.5281/zenodo.22790201)
 
 Live dashboard: https://airtraffic-eu.pages.dev
 · Live API: https://vps.swadhin.cv/health
@@ -191,6 +192,17 @@ uv run pytest -q                                    # unit + integration paths
 uv run dbt build --project-dir dbt --profiles-dir dbt   # 103 models and tests
 cd web && npm run build                              # type-check + production build
 ```
+
+## Citation
+
+The software is archived on Zenodo. Cite the version you used, which for this
+release is v0.1.0:
+
+- Version DOI: https://doi.org/10.5281/zenodo.22790202
+- Concept DOI, always the latest version: https://doi.org/10.5281/zenodo.22790201
+
+`CITATION.cff` carries the machine-readable form, and `paper/` holds the JOSS
+manuscript draft.
 
 ## License
 

@@ -15,6 +15,7 @@ authors:
     orcid: "https://orcid.org/0009-0005-2980-6651"
 version: 0.1.0
 date-released: "2026-09-16"
+doi: 10.5281/zenodo.22790202
 license: MIT
 repository-code: "https://github.com/swadhinbiswas/eu-air-traffic"
 url: "https://airtraffic-eu.pages.dev"
@@ -28,6 +29,9 @@ keywords:
   - Parquet
   - time series
 identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22790201"
+    description: "Concept DOI, resolves to the latest version"
   - type: url
     value: "https://huggingface.co/datasets/swadhinbiswas/air-traffic"
     description: "Dataset lake holding the Bronze and Silver layers"

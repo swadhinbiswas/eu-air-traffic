@@ -36,6 +36,8 @@ def get_card_repo_path() -> str:
 REPO_ID = "swadhinbiswas/air-traffic"
 REPO_URL = "https://huggingface.co/datasets/swadhinbiswas/air-traffic"
 GITHUB_URL = "https://github.com/swadhinbiswas/eu-air-traffic"
+SOFTWARE_DOI = "10.5281/zenodo.22790202"
+SOFTWARE_DOI_URL = "https://doi.org/10.5281/zenodo.22790202"
 
 COLUMN_LIMITATION_NOTE_BY_SPLIT = {
     "positions": "Type-specific columns may be null (e.g. squawk only for transponders that send it).",
@@ -437,6 +439,9 @@ def _body() -> str:
         "  url = {" + REPO_URL + "}",
         "}",
         "```",
+        "",
+        "The software that produces this dataset is archived at",
+        "[%s](%s) (v0.1.0)." % (SOFTWARE_DOI, SOFTWARE_DOI_URL),
         "",
         "## Limitations",
         "",

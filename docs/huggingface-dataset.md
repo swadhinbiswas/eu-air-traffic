@@ -45,6 +45,13 @@ other than `swadhinbiswas/air-traffic`, it refuses a private repo, and it
 skips cleanly without `HF_TOKEN`. Field lists come from the column schemas in
 `scripts/hf_dataset_card.py`, so a schema change there is what updates the card.
 
+## Citing
+
+The dataset is a companion to the software that builds it, archived on Zenodo
+at https://doi.org/10.5281/zenodo.22790202 (v0.1.0, concept DOI
+https://doi.org/10.5281/zenodo.22790201). Cite the dataset directly from the card
+on the Hub page when you only need the data.
+
 ## Cadence and freshness
 
 The collector writes Bronze continuously (positions about every 5 minutes,
