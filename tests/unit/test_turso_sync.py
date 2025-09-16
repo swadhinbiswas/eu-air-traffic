@@ -197,3 +197,75 @@ def test_epoch_ms_accepts_strings_and_datetimes():
     assert _epoch_ms("2026-01-01T10:00:00") == expected  # naive treated as UTC
     assert _epoch_ms(datetime(2026, 1, 1, 10, 0, tzinfo=UTC)) == expected
     assert _epoch_ms("not-a-timestamp") == 0
+
+
+def test_swapping_over_an_existing_table_leaves_no_leftovers(tmp_path):
+    """Republishing a changed static table replaces it without stranding copies."""
+    _, target, source = _run(tmp_path)
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        assert con.execute("SELECT name FROM dim_airport").rows[0][0] == "Frankfurt"
+    finally:
+        con.close()
+
+    src = duckdb.connect(str(source))
+    src.execute("UPDATE dim_airport SET name = 'Frankfurt Main'")
+    src.close()
+
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    counts = publisher.run()
+    assert counts.get("dim_airport") == 1
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        assert con.execute("SELECT name FROM dim_airport").rows[0][0] == "Frankfurt Main"
+        leftovers = con.execute(
+            "SELECT name FROM sqlite_master WHERE name LIKE '%__new' OR name LIKE '%__old'"
+        ).rows
+        assert leftovers == []
+    finally:
+        con.close()
+
+
+def test_swap_does_not_depend_on_the_column_probe(tmp_path, monkeypatch):
+    """The name-collision bug.
+
+    When the column probe failed, existence was read as False, the outgoing
+    table was never moved aside, and the final rename failed with "there is
+    already another table or index with this name". The swap now asks
+    sqlite_master, so an unreliable column probe cannot cause it.
+    """
+    _, target, source = _run(tmp_path)
+
+    monkeypatch.setattr(
+        "scripts.publish_turso.TursoPublisher._sqlite_columns",
+        lambda self, table: [],
+    )
+    src = duckdb.connect(str(source))
+    src.execute("UPDATE dim_airport SET name = 'Frankfurt Hbf'")
+    src.close()
+
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    publisher.run()
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        assert con.execute("SELECT name FROM dim_airport").rows[0][0] == "Frankfurt Hbf"
+        leftovers = con.execute(
+            "SELECT name FROM sqlite_master WHERE name LIKE '%__new' OR name LIKE '%__old'"
+        ).rows
+        assert leftovers == []
+    finally:
+        con.close()
+
+
+def test_table_exists_is_authoritative(tmp_path):
+    _, target, source = _run(tmp_path)
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    assert publisher._connect()
+    try:
+        assert publisher._table_exists("dim_airport") is True
+        assert publisher._table_exists("not_a_table") is False
+    finally:
+        publisher._close()

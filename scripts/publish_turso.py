@@ -286,14 +286,25 @@ class TursoPublisher:
             return []
         return [(str(r[0]), str(r[1])) for r in rows]
 
+    def _table_exists(self, table: str) -> bool:
+        """Authoritative existence check, used by every before/after decision.
+
+        The swap used to infer existence from ``pragma_table_info`` with a
+        broad ``except`` that read any transport hiccup as "does not exist". The
+        outgoing table was then never moved aside and the final rename hit the
+        name that was still occupied (Turso: "already another table or index
+        with this name"). sqlite_master cannot fail that way, and a transport
+        error here raises instead of silently answering no.
+        """
+        result = self.remote.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1", [table]
+        )
+        return bool(result.rows)
+
     def _sqlite_columns(self, table: str) -> list[str]:
-        try:
-            result = self.remote.execute(
-                "SELECT name FROM pragma_table_info(?) ORDER BY cid", [table]
-            )
-            return [str(r[0]) for r in result.rows]
-        except Exception:  # noqa: BLE001 - table does not exist yet
-            return []
+        """Column names for an existing table, or [] when it has no columns yet."""
+        result = self.remote.execute("SELECT name FROM pragma_table_info(?) ORDER BY cid", [table])
+        return [str(r[0]) for r in result.rows]
 
     def _ensure_table(self, table: str, columns: list[tuple[str, str]], replace: bool) -> bool:
         """Returns True only when an existing table was recreated (schema change).
@@ -302,14 +313,14 @@ class TursoPublisher:
         one with data in it invalidates the stored watermark.
         """
         wanted = [c for c, _ in columns]
+        if not self._table_exists(table):
+            self._create_table(table, columns)
+            return False
         existing = self._sqlite_columns(table)
-        if existing and (replace or existing != wanted):
+        if replace or existing != wanted:
             self.remote.execute(f'DROP TABLE IF EXISTS "{table}"')
             self._create_table(table, columns)
             return True
-        if existing:
-            return False
-        self._create_table(table, columns)
         return False
 
     def _create_table(self, table: str, columns: list[tuple[str, str]]) -> None:
@@ -392,18 +403,24 @@ class TursoPublisher:
         names: list[str],
         rows: list[tuple[Any, ...]],
     ) -> None:
-        """Load a shadow table and swap it in, so readers never see it empty."""
+        """Load a shadow table and swap it in, so readers never see it empty.
+
+        The swap is sent as one pipeline request, which Turso executes as a
+        single transaction. That closes the window where a crash between the two
+        renames would leave the table missing, and it means a failure leaves the
+        outgoing table exactly where it was.
+        """
         shadow, previous = f"{table}__new", f"{table}__old"
         defs = ", ".join(f'"{c}" {_sqlite_type(t)}' for c, t in columns)
         self.remote.execute(f'DROP TABLE IF EXISTS "{shadow}"')
         self.remote.execute(f'CREATE TABLE "{shadow}" ({defs})')
         self._write_rows(shadow, names, rows)
-        had_table = bool(self._sqlite_columns(table))
-        self.remote.execute(f'DROP TABLE IF EXISTS "{previous}"')
-        if had_table:
-            self.remote.execute(f'ALTER TABLE "{table}" RENAME TO "{previous}"')
-        self.remote.execute(f'ALTER TABLE "{shadow}" RENAME TO "{table}"')
-        self.remote.execute(f'DROP TABLE IF EXISTS "{previous}"')
+        swap: list[tuple[str, Any]] = [(f'DROP TABLE IF EXISTS "{previous}"', None)]
+        if self._table_exists(table):
+            swap.append((f'ALTER TABLE "{table}" RENAME TO "{previous}"', None))
+        swap.append((f'ALTER TABLE "{shadow}" RENAME TO "{table}"', None))
+        swap.append((f'DROP TABLE IF EXISTS "{previous}"', None))
+        self.remote.batch(swap)  # type: ignore[union-attr]
 
     def _sync_static(self, table: str) -> int:
         columns = self._columns(table)
