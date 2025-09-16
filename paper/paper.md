@@ -20,8 +20,8 @@ bibliography: paper.bib
 
 # Summary
 
-EU Air Traffic collects live and scheduled flight data over Europe and keeps it
-in an open data lake. A collector runs on a small server and polls aircraft
+EU Air Traffic [@eu-air-traffic] collects live and scheduled flight data over
+Europe and keeps it in an open data lake. A collector runs on a small server and polls aircraft
 positions, flight movements, schedules, weather and reference tables; it
 publishes every record to Kafka, and a scheduled job turns that stream into
 Bronze, Silver and Gold layers with dbt models and tests. The repository also
