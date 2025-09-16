@@ -174,6 +174,10 @@ collection from processing, the lake is plain Parquet, dbt owns the
 transformations, and the site reads a derived copy that can be rebuilt from the
 warehouse at any time.
 
+The right column is the migration path this codebase is shaped for, not what is
+running today. What this repository deploys is the left column, and the
+container path under `docker/` is the one that has been exercised end to end.
+
 | Part | Here | Production swap |
 |---|---|---|
 | Collection | one process on a small host, systemd | several collectors in a consumer group, one deployment per source class, scaling by partition |
