@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap run test lint format dashboard dbt api streamlit verify quality clean dbt-docs dbt-test web web-data web-build web-install collector collector-once sink sink-loop live lake-pull-silver lake-push-silver motherduck reference-data
+.PHONY: setup bootstrap run test lint format dashboard dbt api streamlit verify quality clean dbt-docs dbt-test web web-data web-build web-install collector collector-once sink sink-loop live lake-pull-silver lake-push-silver hf-card hf-card-push motherduck reference-data
 
 PYTHON ?= .venv/bin/python
 
@@ -50,6 +50,15 @@ motherduck:
 # Regenerate the aircraft/operator reference data used by the classifier.
 reference-data:
 	$(PYTHON) -m scripts.build_reference_data
+
+# ── Hugging Face dataset card ─────────────────────────────────────────────────
+# Render the Hub README locally, or push it (needs HF_TOKEN; refuses anything
+# but swadhinbiswas/air-traffic and refuses private repos).
+hf-card:
+	$(PYTHON) -m scripts.hf_dataset_card
+
+hf-card-push:
+	$(PYTHON) -m scripts.hf_dataset_card --push
 
 # ── API & Dashboard ───────────────────────────────────────────────────────────
 api:

@@ -10,6 +10,7 @@
 
 Live dashboard: https://airtraffic-eu.pages.dev
 · Live API: https://vps.swadhin.cv/health
+· Data lake: https://huggingface.co/datasets/swadhinbiswas/air-traffic
 · Demo video: coming soon
 
 I built this to watch European airspace without spending anything: live
@@ -45,6 +46,22 @@ is allowed to read). The dashboard reads Turso plus the collector's live API.
 MotherDuck holds the full warehouse, but its free plan cannot issue scoped
 read-only tokens. Turso can, so the browser reads a derived, bounded copy
 there. Cheap to hold, safe to expose, refreshed every cycle.
+
+The raw and curated lake behind all of this — Bronze windows plus the
+eleven Silver snapshots — is published at
+https://huggingface.co/datasets/swadhinbiswas/air-traffic (MIT):
+
+```python
+from datasets import load_dataset
+
+flights = load_dataset(
+    "swadhinbiswas/air-traffic", name="silver", split="flights"
+)
+print(flights[:2])
+```
+
+It is generated and documented in [`docs/huggingface-dataset.md`](docs/huggingface-dataset.md):
+layout, scripts, cadence, and the dataset card.
 
 ## Zero-cost constraints (and how they shaped the design)
 

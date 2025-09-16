@@ -42,7 +42,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACE_TOKEN"),
     )
     huggingface_repo: str = Field(
-        default="air-traffic-warehouse/air-traffic",
+        default="swadhinbiswas/air-traffic",
         validation_alias=AliasChoices("HF_REPO", "HUGGINGFACE_REPO"),
     )
     hf_bronze_prefix: str = Field(default="bronze")

@@ -8,11 +8,11 @@ tags:
   - emissions
   - air transport
 authors:
-  - name: TODO-your-full-name
-    # orcid: 0000-0000-0000-0000
+  - name: Swadhin Biswas
+    orcid: 0009-0005-2980-6651
     affiliation: 1
 affiliations:
- - name: TODO-affiliation, Country
+ - name: Independent Researcher, Bangladesh
    index: 1
 date: 15 September 2026
 bibliography: paper.bib
