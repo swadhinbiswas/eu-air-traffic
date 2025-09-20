@@ -171,7 +171,7 @@ def test_http_client_builds_pipeline_endpoint():
 
 
 def test_unchanged_static_tables_are_reuploaded_only_on_change(tmp_path):
-    from scripts.publish_turso import STATIC_REFRESH_SECONDS
+    from scripts.publish_turso import STATIC_REFRESH_SECONDS, STATIC_TABLES
 
     counts, target, source = _run(tmp_path)
     assert counts.get("dim_airport") == 1
@@ -181,8 +181,82 @@ def test_unchanged_static_tables_are_reuploaded_only_on_change(tmp_path):
     counts = publisher.run()
     assert "dim_airport" not in counts
     assert "gold_airport_metrics" not in counts
-    # Positions are the deliberate exception: capped, not skipped forever.
-    assert STATIC_REFRESH_SECONDS.get("fact_positions", 0) > 0
+    # Large/slow tables keep a refresh floor so a rebuilt warehouse cannot
+    # rewrite them every cycle; the served facts must not include positions.
+    assert STATIC_REFRESH_SECONDS.get("dim_route", 0) > 0
+    assert STATIC_REFRESH_SECONDS.get("gold_fuel_price_series", 0) > 0
+    assert "fact_positions" not in STATIC_TABLES
+    assert "fact_notams" not in STATIC_TABLES
+
+
+def test_refresh_floor_suppresses_churn_on_large_tables(tmp_path):
+    """A changed reference table is not rewritten until its floor elapses."""
+    _, target, source = _run(tmp_path)
+
+    src = duckdb.connect(str(source))
+    src.execute("UPDATE dim_airport SET name = 'Frankfurt Flughafen'")
+    src.close()
+
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    counts = publisher.run()
+    assert "dim_airport" not in counts
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        # The serving copy still holds the previous name: the floor held.
+        assert con.execute("SELECT name FROM dim_airport").rows[0][0] == "Frankfurt"
+    finally:
+        con.close()
+
+
+def test_site_summary_serves_kpis_freshness_and_counts(tmp_path):
+    """The one-row lookup the browser reads instead of scanning fact tables."""
+    import json
+
+    _, target, _ = _run(tmp_path)
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        rows = dict(con.execute("SELECT key, payload_json FROM site_summary").rows)
+        assert {"kpis", "freshness", "manifest", "catalog"} <= set(rows)
+
+        kpis = json.loads(rows["kpis"])
+        assert kpis["total_flights"] == 2
+        assert kpis["airports"] == 1
+        assert kpis["cancellation_rate"] == 0.0
+        assert kpis["avg_delay_minutes"] == 4.0  # (3 + 5) / 2
+
+        freshness = json.loads(rows["freshness"])
+        assert freshness["total_flights"] == 2
+        assert freshness["has_flights"] is True
+        assert freshness["as_of"] is not None
+
+        manifest = json.loads(rows["manifest"])
+        assert manifest["flights"] == 2
+        assert manifest["airports"] == 1
+
+        catalog = json.loads(rows["catalog"])
+        assert catalog["fact_flights"] == 2
+        assert catalog["site_summary"] == 4
+        assert "fact_positions" not in catalog
+    finally:
+        con.close()
+
+
+def test_positions_and_notams_are_not_published(tmp_path):
+    """Deprecated serving tables are dropped, not merely left stale."""
+    counts, target, _ = _run(tmp_path)
+    assert "fact_positions" not in counts
+    assert "fact_notams" not in counts
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        names = {
+            r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").rows
+        }
+        assert "fact_positions" not in names
+        assert "fact_notams" not in names
+    finally:
+        con.close()
 
 
 def test_epoch_ms_accepts_strings_and_datetimes():
@@ -199,8 +273,11 @@ def test_epoch_ms_accepts_strings_and_datetimes():
     assert _epoch_ms("not-a-timestamp") == 0
 
 
-def test_swapping_over_an_existing_table_leaves_no_leftovers(tmp_path):
+def test_swapping_over_an_existing_table_leaves_no_leftovers(tmp_path, monkeypatch):
     """Republishing a changed static table replaces it without stranding copies."""
+    # The per-table refresh floors are exercised elsewhere; this test covers
+    # the swap itself, so let a changed hash publish immediately.
+    monkeypatch.setattr("scripts.publish_turso.STATIC_REFRESH_SECONDS", {})
     _, target, source = _run(tmp_path)
 
     con = libsql_client.create_client_sync(url=f"file:{target}")
@@ -242,6 +319,7 @@ def test_swap_does_not_depend_on_the_column_probe(tmp_path, monkeypatch):
         "scripts.publish_turso.TursoPublisher._sqlite_columns",
         lambda self, table: [],
     )
+    monkeypatch.setattr("scripts.publish_turso.STATIC_REFRESH_SECONDS", {})
     src = duckdb.connect(str(source))
     src.execute("UPDATE dim_airport SET name = 'Frankfurt Hbf'")
     src.close()
@@ -291,6 +369,7 @@ def test_clear_name_handles_tables_and_stray_indexes(tmp_path):
 
 def test_swap_recovers_when_the_name_is_already_taken(tmp_path, monkeypatch):
     """If the batched swap is rejected, the loaded shadow still lands."""
+    monkeypatch.setattr("scripts.publish_turso.STATIC_REFRESH_SECONDS", {})
     _, target, source = _run(tmp_path)
 
     src = duckdb.connect(str(source))

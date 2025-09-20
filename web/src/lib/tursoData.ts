@@ -54,12 +54,65 @@ async function scalar<T>(sql: string, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * Read one precomputed payload from Turso's `site_summary` table.
+ *
+ * The publisher computes the dashboard aggregates from the warehouse and
+ * writes them as single rows, so a poll costs one row instead of scanning the
+ * fact tables. Returns null when the table is missing (e.g. before the first
+ * publish after a deploy), which makes callers fall back to direct queries.
+ */
+async function summaryPayload<T>(key: string): Promise<T | null> {
+  try {
+    const { rows: out } = await tursoQuery(
+      "SELECT payload_json FROM site_summary WHERE key = ? LIMIT 1",
+      [key]
+    );
+    const raw = out[0]?.payload_json;
+    if (typeof raw !== "string" || !raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+interface KpisPayload {
+  total_flights?: number;
+  avg_delay_minutes?: number;
+  cancellation_rate?: number;
+  airports?: number;
+  airlines?: number;
+}
+
+interface FreshnessPayload {
+  as_of?: string | null;
+  total_flights?: number;
+  has_flights?: boolean;
+}
+
+interface ManifestPayload {
+  airports?: number;
+  flights?: number;
+  positions?: number;
+}
+
 /** When the Gold layer was last refreshed + whether flight history exists. */
 export async function fetchFreshness(): Promise<BatchFreshness> {
+  const payload = await summaryPayload<FreshnessPayload>("freshness");
+  if (payload) {
+    const totalFlights = num(payload.total_flights);
+    return {
+      asOf: typeof payload.as_of === "string" && payload.as_of ? payload.as_of : null,
+      totalFlights,
+      hasFlights: payload.has_flights ?? totalFlights > 0,
+    };
+  }
+
+  // Fallback until the next publish writes site_summary.
   const [asOfFlights, asOfPositions, asOfWeather, totalFlights] = await Promise.all([
     scalar<string | null>("SELECT MAX(collected_at) FROM fact_flights", null),
     scalar<string | null>("SELECT MAX(collected_at) FROM fact_positions", null),
-    scalar<string | null>("SELECT MAX(collected_at) FROM weather", null),
+    scalar<string | null>("SELECT MAX(timestamp) FROM weather", null),
     scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
   ]);
   const candidates = [asOfFlights, asOfPositions, asOfWeather].filter(
@@ -85,8 +138,6 @@ export async function fetchAnalytics(): Promise<Analytics> {
     fleet,
     emissions,
     notam_summary,
-    status_mix,
-    catalog,
   ] = await Promise.all([
     rows("SELECT * FROM gold_airport_metrics"),
     rows("SELECT * FROM gold_airline_rankings"),
@@ -94,18 +145,19 @@ export async function fetchAnalytics(): Promise<Analytics> {
     rows("SELECT * FROM gold_weather_impact"),
     rows("SELECT * FROM gold_seasonal_trends"),
     rows("SELECT * FROM gold_fuel_price_series"),
+    // Route aggregates are precomputed in Gold. The old query joined dim_route
+    // to fact_flights here, which read every flight in the serving copy on
+    // each poll; gold_route_performance costs a fraction of those rows.
     rows(
-      "SELECT r.origin, r.destination, r.airline, r.stops, r.equipment, r.distance_km, " +
-        "COUNT(f.flight_id) AS total_flights, AVG(f.delay_minutes) AS avg_delay_minutes " +
-        "FROM dim_route r LEFT JOIN fact_flights f " +
-        "ON f.departure_icao = r.origin AND f.arrival_icao = r.destination " +
-        "GROUP BY 1,2,3,4,5,6 ORDER BY total_flights DESC, distance_km DESC LIMIT 2000"
+      "SELECT origin, destination, airline, total_flights, avg_delay_minutes, " +
+        "avg_distance_km AS distance_km, on_time_rate " +
+        "FROM gold_route_performance " +
+        "ORDER BY total_flights DESC, distance_km DESC LIMIT 2000"
     ),
     rows("SELECT type_icao, manufacturer, family, engine, capacity, range_km FROM dim_aircraft ORDER BY capacity DESC"),
     rows("SELECT aircraft_type, fuel_burn_liters_per_hour, co2_kg_per_hour FROM fact_emissions ORDER BY co2_kg_per_hour DESC"),
-    rows("SELECT icao_location, COUNT(*) AS notam_count FROM fact_notams GROUP BY icao_location ORDER BY notam_count DESC"),
-    rows("SELECT status, COUNT(*) AS flight_count, ROUND(AVG(delay_minutes), 1) AS avg_delay FROM fact_flights GROUP BY status ORDER BY flight_count DESC"),
-    fetchCatalog(),
+    // Gold mart: the same grouping the client used to compute over fact_notams.
+    rows("SELECT icao_location, notam_count, notam_type FROM gold_notam_summary ORDER BY notam_count DESC"),
   ]);
   return {
     gold_airport_metrics,
@@ -118,12 +170,26 @@ export async function fetchAnalytics(): Promise<Analytics> {
     fleet,
     emissions,
     notam_summary,
-    status_mix,
-    catalog,
+    // Status mix is already one row per status in gold_delay_analysis.
+    status_mix: gold_delay_analysis,
   } as unknown as Analytics;
 }
 
 export async function fetchKpis(): Promise<Kpis> {
+  const payload = await summaryPayload<KpisPayload>("kpis");
+  if (payload) {
+    return {
+      total_flights: num(payload.total_flights),
+      avg_delay_minutes: num(payload.avg_delay_minutes),
+      cancellation_rate: num(payload.cancellation_rate),
+      airports: num(payload.airports),
+      airlines: num(payload.airlines),
+      live_aircraft: 0,
+      metars: 0,
+    };
+  }
+
+  // Fallback until the next publish writes site_summary: direct aggregates.
   const [total_flights, avg_delay_minutes, cancelled, airlines, airports] = await Promise.all([
     scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
     scalar<number>("SELECT AVG(delay_minutes) FROM fact_flights WHERE status != 'cancelled'", 0),
@@ -215,14 +281,14 @@ export async function fetchCatalog(): Promise<Catalog> {
   );
   const names = tableRows.map((t) => str(t.name)).filter(Boolean);
 
-  // Column metadata for every table in one round trip.
+  // Row counts come from the publisher's precomputed summary: counting every
+  // table from the browser read each fact table in full on every catalog view.
+  const summaryCounts = await summaryPayload<Record<string, number>>("catalog");
+  let counts: Record<string, number> = summaryCounts ?? {};
+  // Column metadata is a metadata-only round trip, so it stays live.
   let columnSets: Record<string, Array<{ name: string; type: string; notnull: number }>> = {};
-  let counts: Record<string, number> = {};
   try {
-    const [columns, rowCounts] = await Promise.all([
-      tursoBatch(names.map((n) => `PRAGMA table_info("${n.replace(/"/g, "")}")`)),
-      tursoBatch(names.map((n) => `SELECT COUNT(*) AS n FROM "${n.replace(/"/g, "")}"`)),
-    ]);
+    const columns = await tursoBatch(names.map((n) => `PRAGMA table_info("${n.replace(/"/g, "")}")`));
     columnSets = Object.fromEntries(
       names.map((n, i) => [
         n,
@@ -233,9 +299,15 @@ export async function fetchCatalog(): Promise<Catalog> {
         })),
       ])
     );
-    counts = Object.fromEntries(
-      names.map((n, i) => [n, num(Object.values(rowCounts[i].rows[0] ?? {})[0])])
-    );
+    if (!summaryCounts) {
+      // Fallback until the next publish writes site_summary.
+      const rowCounts = await tursoBatch(
+        names.map((n) => `SELECT COUNT(*) AS n FROM "${n.replace(/"/g, "")}"`)
+      );
+      counts = Object.fromEntries(
+        names.map((n, i) => [n, num(Object.values(rowCounts[i].rows[0] ?? {})[0])])
+      );
+    }
   } catch {
     /* metadata is best-effort; tables still render */
   }
@@ -335,15 +407,26 @@ interface LiveStatusResponse {
 }
 
 export async function fetchManifest(): Promise<BundleManifest> {
-  const [airportCount, flightCount, positionCount] = await Promise.all([
-    scalar<number>("SELECT COUNT(*) FROM dim_airport", 0),
-    scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
-    scalar<number>("SELECT COUNT(*) FROM fact_positions", 0),
-  ]);
+  const payload = await summaryPayload<ManifestPayload>("manifest");
+  const counts = payload
+    ? {
+        airports: num(payload.airports),
+        flights: num(payload.flights),
+        positions: num(payload.positions),
+      }
+    : await (async () => {
+        // Fallback until the next publish writes site_summary.
+        const [airportCount, flightCount, positionCount] = await Promise.all([
+          scalar<number>("SELECT COUNT(*) FROM dim_airport", 0),
+          scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
+          scalar<number>("SELECT COUNT(*) FROM fact_positions", 0),
+        ]);
+        return { airports: airportCount, flights: flightCount, positions: positionCount };
+      })();
   return {
     version: 4,
     generated_at: new Date().toISOString(),
-    counts: { airports: airportCount, flights: flightCount, positions: positionCount },
+    counts,
     files: [
       "airports.json",
       "positions.json",

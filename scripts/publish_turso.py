@@ -5,10 +5,20 @@ browser can safely hold, so analytics and the SQL workbench query it directly
 with no API in between. MotherDuck remains the warehouse — this is a derived,
 one-way copy.
 
-Write budget is the constraint: the free tier allows a limited number of row
-writes per month, so small tables are fully replaced while the two growing
-fact tables are synced **incrementally** against a watermark kept in Turso's
-``_sync_state`` table.
+Both budgets are constraints, since Turso bills rows read and rows written:
+
+* Small tables are fully replaced, but only when their content hash changes
+  **and** a per-table refresh floor (``STATIC_REFRESH_SECONDS``) has elapsed.
+  Slow-moving reference data cannot churn just because the lake runs again.
+* The two growing fact tables are synced **incrementally** against a watermark
+  kept in Turso's ``_sync_state`` table, so each row is written once.
+* The numbers the dashboard used to aggregate on every page load (COUNT/AVG/
+  MAX/GROUP BY over the facts) are precomputed locally and published as the
+  one-row ``site_summary`` lookup. Reading it costs a single row per poll
+  instead of scanning the whole fact table.
+* Tables the site no longer needs (``fact_positions``, ``fact_notams``) are
+  dropped from the serving copy: the live map reads the VPS snapshot, and the
+  Gold marts carry the aggregates the pages actually render.
 
     python -m scripts.publish_turso
     python -m scripts.publish_turso --url file:/tmp/x.db   # local test
@@ -34,6 +44,9 @@ from config.logging import logger
 from config.settings import settings
 
 # Small tables: replaced wholesale every run (cheap, always consistent).
+# fact_positions and fact_notams are deliberately absent: the live map reads
+# the VPS snapshot, fact_notams is only consumed through gold_notam_summary,
+# and rewriting positions (up to 5k rows) every cycle dominated writes.
 STATIC_TABLES = (
     "dim_airport",
     "dim_airline",
@@ -42,8 +55,6 @@ STATIC_TABLES = (
     "dim_date",
     "dim_fuel",
     "fact_emissions",
-    "fact_notams",
-    "fact_positions",
     "gold_airport_metrics",
     "gold_airline_rankings",
     "gold_delay_analysis",
@@ -61,6 +72,9 @@ STATIC_TABLES = (
     "site_ops",
     "site_lineage",
 )
+# Tables that older versions of this publisher put in Turso and nothing reads
+# any more. They are dropped once so the catalog reflects what actually serves.
+DEPRECATED_TABLES = ("fact_positions", "fact_notams")
 # Growing tables: upserted incrementally. table → (primary key, watermark column)
 GROWING_TABLES: dict[str, tuple[tuple[str, ...], str]] = {
     # collected_at, not actual_arrival: en-route and cancelled flights have no
@@ -72,9 +86,24 @@ BATCH_SIZE = 400
 # Rows per INSERT statement (400 separate statements were the bottleneck).
 MULTI_ROW_STATEMENT_ROWS = 100
 MAX_ROWS_PER_SYNC = 20_000
-# Static tables upload only when their content hash changes. Positions move
-# every cycle, so their refresh is capped to protect the free write budget.
-STATIC_REFRESH_SECONDS: dict[str, int] = {"fact_positions": 900}
+# Static tables upload only when their content hash changes, and a table with
+# an entry here also waits out that many seconds between uploads. Without the
+# floor a rebuilt reference table (or a large derived mart) would be written in
+# full on every lake cycle because the warehouse replaces its source files.
+# Floors apply to large/slow tables only; small marts update every cycle.
+STATIC_REFRESH_SECONDS: dict[str, int] = {
+    # Reference dimensions: daily is generous, they change on upstream updates.
+    "dim_airport": 86_400,
+    "dim_route": 86_400,
+    "dim_fuel": 86_400,
+    "dim_date": 86_400,
+    # Large derived series: hours, not minutes, are the useful resolution.
+    "gold_fuel_price_series": 21_600,
+    "gold_route_performance": 3_600,
+    "gold_sector_analysis": 3_600,
+    # Eurostat publishes monthly with a two-month lag; daily is ample.
+    "gold_airport_official_traffic": 86_400,
+}
 # When a growing table is recreated after a schema change it must be re-seeded;
 # the old watermark points past rows that no longer exist.
 GROWING_RESET_LOOKBACK_MS: dict[str, int] = {
@@ -473,8 +502,8 @@ class TursoPublisher:
         now_ms = int(time.time() * 1000)
         refresh_ms = STATIC_REFRESH_SECONDS.get(table, 0) * 1000
         if refresh_ms and now_ms - last_sync_ms < refresh_ms:
-            # Changed, but this table has a refresh floor (positions move every
-            # cycle; re-publishing them every run wastes the write budget).
+            # Changed, but this table has a refresh floor: re-publishing a
+            # large reference/mart table every cycle wastes the write budget.
             return 0
         self._replace_table(table, columns, names, rows)
         self._state_set(table, f"static:{now_ms}:{digest}")
@@ -524,6 +553,129 @@ class TursoPublisher:
         logger.info("[turso] %s: +%s rows (watermark %s)", table, written, peak)
         return written
 
+    # ── serving summary ────────────────────────────────────────────────────
+    def _drop_deprecated(self) -> None:
+        """Remove serving tables the dashboard no longer reads (once)."""
+        for table in DEPRECATED_TABLES:
+            if self._table_exists(table):
+                self.remote.execute(f'DROP TABLE IF EXISTS "{table}"')
+                logger.info("[turso] dropped deprecated serving table %s", table)
+
+    def _local_tables(self) -> set[str]:
+        """Names of the local warehouse tables/views in the main schema."""
+        assert self.local is not None
+        rows = self.local.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+
+    def _publish_summary(self) -> None:
+        """Publish the numbers the dashboard used to aggregate in Turso.
+
+        Every page poll used to COUNT/AVG/MAX the fact tables with the browser's
+        read-only token: each of those queries scans the whole table, so reads
+        scaled with table size × refreshes × visitors. The same numbers are
+        computed here from the local warehouse (free) and served as a handful of
+        one-row payloads, so a browser poll reads one row instead of millions.
+
+        Keys: ``kpis``, ``freshness``, ``manifest`` (counts) and ``catalog``
+        (row count per serving table). Best-effort: the site falls back to the
+        direct aggregate queries when this table is missing.
+        """
+        assert self.local is not None
+        local = self.local
+        existing = self._local_tables()
+
+        def count(table: str, where: str = "") -> int:
+            if table not in existing:
+                return 0
+            clause = f" WHERE {where}" if where else ""
+            try:
+                row = local.execute(f'SELECT COUNT(*) FROM "{table}"{clause}').fetchone()
+            except duckdb.Error:
+                # Schema drift in the local warehouse must not sink the summary.
+                return 0
+            return int(row[0]) if row and row[0] is not None else 0
+
+        def max_text(table: str, column: str) -> str | None:
+            if table not in existing:
+                return None
+            try:
+                row = local.execute(f'SELECT MAX("{column}") FROM "{table}"').fetchone()
+            except duckdb.Error:
+                return None
+            value = row[0] if row else None
+            return None if value is None else str(value)
+
+        total_flights = count("fact_flights")
+        cancelled = count("fact_flights", "status = 'cancelled'")
+        avg_delay = 0.0
+        if "fact_flights" in existing:
+            try:
+                avg_row = local.execute(
+                    "SELECT AVG(delay_minutes) FROM fact_flights WHERE status != 'cancelled'"
+                ).fetchone()
+                avg_delay = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+            except duckdb.Error:
+                avg_delay = 0.0
+
+        # "Data as of" is the newest of the same three candidates the client
+        # used to MAX() directly; compare on epoch so mixed text/timestamp
+        # representations cannot sort wrongly.
+        best: tuple[int, str] | None = None
+        for value in (
+            max_text("fact_flights", "collected_at"),
+            max_text("fact_positions", "collected_at"),
+            max_text("weather", "timestamp"),
+        ):
+            if not value:
+                continue
+            moment = _epoch_ms(value)
+            if best is None or moment > best[0]:
+                best = (moment, value)
+        as_of = best[1] if best else None
+
+        serving = [table for table in (*STATIC_TABLES, *GROWING_TABLES) if table in existing]
+        catalog_counts = {table: count(table) for table in serving}
+
+        payloads: dict[str, Any] = {
+            "kpis": {
+                "total_flights": total_flights,
+                "avg_delay_minutes": round(avg_delay, 2),
+                "cancellation_rate": (
+                    round(cancelled / total_flights, 4) if total_flights else 0.0
+                ),
+                "airports": count("dim_airport"),
+                "airlines": count("dim_airline"),
+            },
+            "freshness": {
+                "as_of": as_of,
+                "total_flights": total_flights,
+                "has_flights": total_flights > 0,
+            },
+            "manifest": {
+                "airports": count("dim_airport"),
+                "flights": total_flights,
+                # The live map reads positions from the VPS snapshot; this is
+                # the warehouse inventory the header shows, not a serving table.
+                "positions": count("fact_positions"),
+            },
+            "catalog": catalog_counts,
+        }
+        # The summary is itself a serving table (one row per payload key).
+        catalog_counts["site_summary"] = len(payloads)
+        rows = [
+            (key, json.dumps(value, separators=(",", ":"), default=str))
+            for key, value in payloads.items()
+        ]
+        self._replace_table(
+            "site_summary",
+            [("key", "TEXT"), ("payload_json", "TEXT")],
+            ["key", "payload_json"],
+            rows,
+        )
+        logger.info("[turso] site_summary: %s keys, %s serving tables", len(rows), len(serving))
+
     def run(self) -> dict[str, int]:
         from scripts.publish_site_tables import build_site_payloads, write_site_tables_local
 
@@ -552,6 +704,7 @@ class TursoPublisher:
                 "CREATE TABLE IF NOT EXISTS _sync_state "
                 "(table_name TEXT PRIMARY KEY, watermark TEXT)"
             )
+            self._drop_deprecated()
             for table in STATIC_TABLES:
                 written = self._sync_static(table)
                 if written:
@@ -560,6 +713,13 @@ class TursoPublisher:
                 written = self._sync_growing(table)
                 if written:
                     self.counts[table] = written
+            # Last, so counts and freshness reflect everything just written.
+            # Best-effort: the site keeps working (with direct aggregate reads)
+            # until the next successful publish writes it.
+            try:
+                self._publish_summary()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[turso] site_summary publish failed: %s", exc)
 
             logger.info(
                 "[turso] published %s tables → %s (rows: %s)",

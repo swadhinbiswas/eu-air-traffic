@@ -3,6 +3,7 @@ import {
   loadBundle,
   type Airport,
   type Analytics,
+  type Catalog,
   type Kpis,
   type Metar,
   type Ops,
@@ -15,8 +16,13 @@ import type { BatchFreshness } from "../lib/tursoData";
 /**
  * Load a dashboard dataset at runtime (warehouse API / collector), refreshing
  * periodically so the site stays current without a rebuild.
+ *
+ * Turso bills rows read, so hidden tabs must not keep polling: the interval
+ * skips while `document.hidden`, and returning to the tab refreshes once. The
+ * intervals themselves mirror the lake cadence (15 minutes) rather than
+ * hammering for data that cannot have changed.
  */
-function useRuntimeData<T>(file: string, refreshMs = 60_000) {
+function useRuntimeData<T>(file: string, refreshMs = 300_000) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,11 +48,17 @@ function useRuntimeData<T>(file: string, refreshMs = 60_000) {
       }
     }
 
+    const refreshIfVisible = () => {
+      if (!document.hidden) void load();
+    };
+
     void load();
-    const id = refreshMs > 0 ? setInterval(load, refreshMs) : null;
+    const id = refreshMs > 0 ? setInterval(refreshIfVisible, refreshMs) : null;
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       alive = false;
       if (id) clearInterval(id);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [file, refreshMs]);
 
@@ -57,7 +69,7 @@ export function useManifest() {
   return useRuntimeData<BundleManifest>("manifest.json");
 }
 export function useAirports() {
-  return useRuntimeData<Airport[]>("airports.json");
+  return useRuntimeData<Airport[]>("airports.json", 600_000);
 }
 export function useMetars() {
   return useRuntimeData<Metar[]>("metars.json");
@@ -66,22 +78,21 @@ export function useAnalytics() {
   return useRuntimeData<Analytics>("analytics.json");
 }
 export function useCatalog() {
-  const { data, error, loading } = useRuntimeData<Analytics>("analytics.json");
-  return { data: data?.catalog ?? null, error, loading };
+  return useRuntimeData<Catalog>("catalog.json", 600_000);
 }
 export function useStories() {
-  return useRuntimeData<Story[]>("stories.json");
+  return useRuntimeData<Story[]>("stories.json", 900_000);
 }
 export function useOps() {
   return useRuntimeData<Ops>("ops.json");
 }
 export function useKpis() {
-  return useRuntimeData<Kpis>("kpis.json", 30_000);
+  return useRuntimeData<Kpis>("kpis.json");
 }
 
 /** Warehouse freshness + whether flight history exists (drives empty states). */
 export function useBatchStatus() {
-  return useRuntimeData<BatchFreshness>("freshness.json", 60_000);
+  return useRuntimeData<BatchFreshness>("freshness.json");
 }
 
 /** Live aircraft positions (runtime bundle; the map uses the live snapshot). */

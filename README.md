@@ -48,7 +48,8 @@ is allowed to read). The dashboard reads Turso plus the collector's live API.
 MotherDuck holds the full warehouse, but its user model cannot issue scoped
 read-only tokens to a browser. Turso can, so the site reads a derived, bounded
 copy there instead: small enough to hold cheaply, safe to expose, refreshed
-every cycle.
+every cycle. The dashboard's paging totals come from a precomputed
+`site_summary` lookup, so browser polls never scan the fact tables.
 
 The raw and curated lake behind all of this, Bronze windows plus the eleven
 Silver snapshots, is published at
@@ -73,7 +74,7 @@ layout, scripts, cadence, and the dataset card.
 | Kafka: five topics per cluster | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
 | OpenSky: credit budgets per endpoint | `/flights/all` (one request, both ends) + live departures for 4 hubs + a nightly arrivals backfill; ~2.7k of 4k daily credits |
 | AirLabs: 1,000 calls/month, 50 rows/call | Rotating hubs, persisted monthly counter that stops at the budget, IATA→ICAO resolved from bundled data (no extra calls) |
-| Turso: row-write budget | Statics upload only when a content hash changes; positions have a refresh floor; growing tables are watermark-synced |
+| Turso: row read/write budget | Dashboard aggregates are precomputed into a one-row `site_summary` lookup; statics upload only when a content hash changes and past a refresh floor; growing tables are watermark-synced; tables the site no longer needs are dropped from the serving copy |
 | Object storage: storage and commit budget | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
 | CI runners: shared and ephemeral | Frontend-only pushes skip the lake entirely, and the job fails fast instead of retrying silently |
 | VPS: 2 cores | The box only collects; all transformation runs in CI |
