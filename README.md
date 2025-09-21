@@ -146,7 +146,7 @@ AIR_TRAFFIC_DUCKDB_PATH=$PWD/warehouse/air_traffic.duckdb uv run dbt build --pro
 | `MOTHERDUCK_TOKEN`, `MOTHERDUCK_DATABASE` | Warehouse |
 | `TURSO_TARGETS` | JSON array of `{name,url,token,tables}` serving databases; a table listed in several targets is mirrored for read failover (publisher uses the read-write tokens) |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Legacy single serving database, used only when `TURSO_TARGETS` is empty |
-| `VITE_LIVE_URL`, `VITE_TURSO_TARGETS`, `VITE_TURSO_URL`, `VITE_TURSO_TOKEN` | Dashboard build-time values; every Turso token must be read-only |
+| `VITE_LIVE_URL`, `VITE_TURSO_URL_n`, `VITE_TURSO_TOKEN_n`, `VITE_TURSO_TARGETS` | Dashboard build-time values; every Turso token must be read-only |
 
 Sane defaults, override only if needed: `POSITIONS_INTERVAL_SECONDS=15`,
 `POSITIONS_PUBLISH_INTERVAL_SECONDS=300`, `FLIGHTS_INTERVAL_SECONDS=1800`,

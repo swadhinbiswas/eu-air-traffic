@@ -10,6 +10,9 @@
  * and keeps using the fallback while the failed target cools down. Every copy
  * is an independent database — no Turso replication.
  *
+ *   VITE_TURSO_URL_1 +
+ *   VITE_TURSO_TOKEN_1  one variable per field, repeated with 2, 3, … — no JSON
+ *                       to escape, so a hosting dashboard cannot mangle it
  *   VITE_TURSO_TARGETS  JSON array of {name,url,token,tables}; `tables` may be
  *                       omitted or "*" for a target holding every serving table
  *   VITE_TURSO_URL +
@@ -41,50 +44,160 @@ const RANKING_TTL_MS = 5 * 60_000;
 const RANKING_TIMEOUT_MS = 2_500;
 const FRESHNESS_SQL = "SELECT payload_json FROM site_summary WHERE key = 'freshness' LIMIT 1";
 
-function parseTargets(): TursoTarget[] {
-  const raw = (import.meta.env.VITE_TURSO_TARGETS as string | undefined)?.trim();
-  if (raw) {
+/** Connection URLs, used to spot a target whose `url` key was lost. */
+const URL_LIKE = /^(?:libsql|https?|wss?|file):/i;
+/** Turso issues JWTs; used to spot a keyless token value. */
+const TOKEN_LIKE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+const ENV = import.meta.env as Record<string, unknown>;
+
+function envValue(key: string): string {
+  return String(ENV[key] ?? "").trim();
+}
+
+function tablesOf(listed: string[]): Set<string> | null {
+  return listed.length && !listed.includes("*") ? new Set(listed) : null;
+}
+
+/**
+ * Turn decoded entries into targets. A value with no key that looks like a
+ * connection URL or a token fills the matching missing field, so an entry
+ * written as `{"name":"eu-1","libsql://…","token":"…"}` still routes.
+ */
+function toTargets(entries: unknown[]): TursoTarget[] {
+  const targets: TursoTarget[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const strings = Object.values(record).filter(
+      (value): value is string => typeof value === "string"
+    );
+    const name = String(record.name ?? "").trim();
+    const url = String(record.url ?? strings.find((value) => URL_LIKE.test(value)) ?? "").trim();
+    const token = String(record.token ?? strings.find((value) => TOKEN_LIKE.test(value)) ?? "").trim();
+    if (!name || !url || !token) {
+      console.warn(`[turso] ignoring target ${name || "(unnamed)"}: needs name, url, token`);
+      continue;
+    }
+    if (targets.some((target) => target.name === name)) {
+      console.warn(`[turso] ignoring duplicate target ${name}`);
+      continue;
+    }
+    const listed = Array.isArray(record.tables)
+      ? record.tables.map((table) => String(table).trim()).filter(Boolean)
+      : typeof record.tables === "string"
+        ? record.tables
+            .split(",")
+            .map((table) => table.trim())
+            .filter(Boolean)
+        : [];
+    targets.push({ name, url, token, tables: tablesOf(listed) });
+  }
+  return targets;
+}
+
+/** Best-effort repairs for hand-written JSON: BOM, single quotes, trailing commas. */
+function repairJson(raw: string): string {
+  return raw
+    .replace(/^\uFEFF/, "")
+    .replace(/([{,[]\s*)'([^']*)'(\s*:)/g, '$1"$2"$3')
+    .replace(/:\s*'([^']*)'/g, ': "$1"')
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+/** Read `{…}` blocks from an unparseable value and keep the fields they hold. */
+function salvageEntries(raw: string): unknown[] {
+  const entries: Record<string, unknown>[] = [];
+  for (const block of raw.matchAll(/\{[^{}]*\}/g)) {
+    const record: Record<string, unknown> = {};
+    const values: string[] = [];
+    for (const quoted of block[0].matchAll(/"((?:[^"\\]|\\.)*)"/g)) values.push(quoted[1]);
+    for (const pair of block[0].matchAll(
+      /"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"((?:[^"\\]|\\.)*)"/g
+    )) {
+      record[pair[1]] = pair[2];
+    }
+    const used = new Set(
+      Object.values(record).filter((value): value is string => typeof value === "string")
+    );
+    for (const value of values) {
+      if (used.has(value)) continue;
+      if (record.url === undefined && URL_LIKE.test(value)) record.url = value;
+      else if (record.token === undefined && TOKEN_LIKE.test(value)) record.token = value;
+    }
+    if (record.name !== undefined || record.url !== undefined) entries.push(record);
+  }
+  return entries;
+}
+
+function jsonTargets(raw: string): TursoTarget[] {
+  for (const candidate of [raw, repairJson(raw)]) {
     try {
-      const data: unknown = JSON.parse(raw);
-      if (Array.isArray(data)) {
-        const targets: TursoTarget[] = [];
-        for (const entry of data) {
-          if (!entry || typeof entry !== "object") continue;
-          const record = entry as Record<string, unknown>;
-          const name = String(record.name ?? "").trim();
-          const url = String(record.url ?? "").trim();
-          const token = String(record.token ?? "").trim();
-          if (!name || !url || !token) {
-            console.warn(`[turso] ignoring target ${name || "(unnamed)"}: needs name, url, token`);
-            continue;
-          }
-          if (targets.some((target) => target.name === name)) {
-            console.warn(`[turso] ignoring duplicate target ${name}`);
-            continue;
-          }
-          const listed = Array.isArray(record.tables)
-            ? record.tables.map((table) => String(table).trim()).filter(Boolean)
-            : typeof record.tables === "string"
-              ? record.tables
-                  .split(",")
-                  .map((table) => table.trim())
-                  .filter(Boolean)
-              : [];
-          const wildcard = listed.length === 0 || listed.includes("*");
-          targets.push({ name, url, token, tables: wildcard ? null : new Set(listed) });
-        }
-        if (targets.length) return targets;
-        console.warn("[turso] no usable target in VITE_TURSO_TARGETS; trying VITE_TURSO_URL");
-      } else {
-        console.warn("[turso] VITE_TURSO_TARGETS is not a JSON array; trying VITE_TURSO_URL");
-      }
-    } catch (err) {
-      console.warn("[turso] VITE_TURSO_TARGETS is not valid JSON; trying VITE_TURSO_URL", err);
+      const data: unknown = JSON.parse(candidate);
+      const entries = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { targets?: unknown } | null)?.targets)
+          ? (data as { targets: unknown[] }).targets
+          : [data];
+      const targets = toTargets(entries);
+      if (targets.length) return targets;
+    } catch {
+      /* try the next form */
     }
   }
+  const salvaged = toTargets(salvageEntries(raw));
+  if (salvaged.length) {
+    console.warn("[turso] VITE_TURSO_TARGETS is not valid JSON; recovered what it could read");
+  }
+  return salvaged;
+}
 
-  const url = (import.meta.env.VITE_TURSO_URL as string | undefined)?.trim() || "";
-  const token = (import.meta.env.VITE_TURSO_TOKEN as string | undefined)?.trim() || "";
+/**
+ * Targets from one-variable-per-field config (`VITE_TURSO_URL_1` +
+ * `VITE_TURSO_TOKEN_1`, then 2, 3, …). No JSON escaping involved, which is what
+ * makes it survive a copied or line-wrapped value in a hosting dashboard.
+ */
+function numberedTargets(): TursoTarget[] {
+  const indexes = new Set<number>();
+  for (const key of Object.keys(ENV)) {
+    const match = /^VITE_TURSO_URL_(\d+)$/.exec(key);
+    if (match) indexes.add(Number(match[1]));
+  }
+
+  const targets: TursoTarget[] = [];
+  for (const index of [...indexes].sort((a, b) => a - b)) {
+    const url = envValue(`VITE_TURSO_URL_${index}`);
+    const token = envValue(`VITE_TURSO_TOKEN_${index}`);
+    if (!url || !token) {
+      console.warn(
+        `[turso] ignoring VITE_TURSO_URL_${index}: ` +
+          `VITE_TURSO_URL_${index} and VITE_TURSO_TOKEN_${index} are both required`
+      );
+      continue;
+    }
+    const name = envValue(`VITE_TURSO_NAME_${index}`) || `turso-${index}`;
+    const listed = envValue(`VITE_TURSO_TABLES_${index}`)
+      .split(",")
+      .map((table) => table.trim())
+      .filter(Boolean);
+    targets.push({ name, url, token, tables: tablesOf(listed) });
+  }
+  return targets;
+}
+
+function parseTargets(): TursoTarget[] {
+  const numbered = numberedTargets();
+  if (numbered.length) return numbered;
+
+  const raw = envValue("VITE_TURSO_TARGETS");
+  if (raw) {
+    const targets = jsonTargets(raw);
+    if (targets.length) return targets;
+    console.warn("[turso] no usable target in VITE_TURSO_TARGETS; trying VITE_TURSO_URL");
+  }
+
+  const url = envValue("VITE_TURSO_URL");
+  const token = envValue("VITE_TURSO_TOKEN");
   if (!url || !token) return [];
   return [{ name: "primary", url, token, tables: null }];
 }
@@ -311,7 +424,7 @@ export function tursoUrl(): string {
 /** Run a SQL statement. Read-only tokens mean writes are rejected server-side. */
 export async function tursoQuery(sql: string, args: unknown[] = []): Promise<TursoResult> {
   if (!tursoConfigured()) {
-    throw new Error("Turso is not configured (VITE_TURSO_TARGETS / VITE_TURSO_URL).");
+    throw new Error("Turso is not configured (VITE_TURSO_URL_1/TOKEN_1, VITE_TURSO_TARGETS or VITE_TURSO_URL).");
   }
   await ensureRanking();
   return route(sql, (target) => executeOn(target, sql, args));
@@ -324,7 +437,7 @@ export async function tursoQuery(sql: string, args: unknown[] = []): Promise<Tur
  */
 export async function tursoTables(): Promise<string[]> {
   if (!tursoConfigured()) {
-    throw new Error("Turso is not configured (VITE_TURSO_TARGETS / VITE_TURSO_URL).");
+    throw new Error("Turso is not configured (VITE_TURSO_URL_1/TOKEN_1, VITE_TURSO_TARGETS or VITE_TURSO_URL).");
   }
   const names = new Set<string>();
   const failures: unknown[] = [];
@@ -354,7 +467,7 @@ export async function tursoTables(): Promise<string[]> {
  */
 export async function tursoBatch(sql: string[]): Promise<TursoResult[]> {
   if (!tursoConfigured()) {
-    throw new Error("Turso is not configured (VITE_TURSO_TARGETS / VITE_TURSO_URL).");
+    throw new Error("Turso is not configured (VITE_TURSO_URL_1/TOKEN_1, VITE_TURSO_TARGETS or VITE_TURSO_URL).");
   }
   await ensureRanking();
   const results: Array<TursoResult | undefined> = new Array(sql.length);

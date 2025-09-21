@@ -5,9 +5,14 @@
 #   Build output:         web/dist   (also declared below)
 # and add the build-time variables under Settings → Environment variables:
 #   VITE_LIVE_URL        https://vps.example.com       (VPS live API)
-#   VITE_TURSO_TARGETS   JSON array of {name,url,read-only token,tables}; a
-#                        table listed in several targets is mirrored and the
-#                        dashboard fails over between the copies
+#   VITE_TURSO_URL_1     libsql://eu-1.turso.io
+#   VITE_TURSO_TOKEN_1   READ-ONLY token for target 1
+#   VITE_TURSO_URL_2     libsql://eu-2.turso.io       (and so on per target)
+#   VITE_TURSO_TOKEN_2   READ-ONLY token for target 2 — inlined into the bundle
+#   VITE_TURSO_TARGETS   alternative to the numbered vars: JSON array of
+#                        {name,url,read-only token,tables}; a table listed in
+#                        several targets is mirrored and the dashboard fails
+#                        over between the copies
 #   VITE_TURSO_URL       legacy single database (used when TARGETS is empty)
 #   VITE_TURSO_TOKEN     READ-ONLY Turso token — inlined into the bundle
 #   VITE_API_URL         optional FastAPI warehouse API
