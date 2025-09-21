@@ -190,7 +190,10 @@ def parse_targets(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"[turso] TURSO_TARGETS is not valid JSON: {exc}") from exc
+        raise RuntimeError(
+            f"[turso] TURSO_TARGETS is not valid JSON: {exc}. Each entry must look like "
+            '{"name": "eu-1", "url": "libsql://...", "token": "..."}'
+        ) from exc
     if not isinstance(data, list) or not data:
         raise RuntimeError("[turso] TURSO_TARGETS must be a non-empty JSON array")
 
@@ -976,7 +979,18 @@ def publish(
             counts = publisher.run()
         except Exception as exc:  # noqa: BLE001 - the other targets must proceed
             failures.append(target.name)
-            logger.error("[turso] %s: publish failed: %s", target.name, exc)
+            reason = str(exc)
+            if "writes are blocked" in reason or "Operation was blocked" in reason:
+                # Free-tier write budget exhausted (or the database is read-only
+                # for another reason). Reads still work, so its mirrors serve;
+                # publishing to it resumes by itself when the quota resets.
+                logger.warning(
+                    "[turso] %s: writes are blocked (free-plan write budget exhausted?) — "
+                    "its mirrors keep serving until the quota resets",
+                    target.name,
+                )
+            else:
+                logger.error("[turso] %s: publish failed: %s", target.name, exc)
             continue
         for table, written in counts.items():
             combined[table] = combined.get(table, 0) + written
