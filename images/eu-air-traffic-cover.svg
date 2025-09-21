@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="t d">
+  <title id="t">EU Air Traffic pipeline</title>
+  <desc id="d">Upstream APIs feed a VPS collector that publishes to Kafka. A scheduled job builds Bronze, Silver, DuckDB and dbt layers, publishes to Hugging Face and MotherDuck, and syncs a read-only Turso copy the dashboard reads.</desc>
+  <defs>
+    <radialGradient id="bgGlow" cx="18%" cy="0%" r="95%">
+      <stop offset="0%" stop-color="#151A24"/>
+      <stop offset="55%" stop-color="#0C0C10"/>
+      <stop offset="100%" stop-color="#09090B"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1C1C23"/>
+    </pattern>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="60%" stop-color="#D6D6DC"/>
+      <stop offset="100%" stop-color="#9A9AA4"/>
+    </linearGradient>
+    <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#67E8F9" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#67E8F9" stop-opacity="0"/>
+    </linearGradient>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5A5A66"/>
+    </marker>
+    <style>
+      .f { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .card { fill: #121218; stroke: #2E2E37; stroke-width: 1; }
+      .card-title { fill: #ECECF1; font-size: 12.5px; font-weight: 700; letter-spacing: .5px; }
+      .sub { fill: #8C8C97; font-size: 10px; }
+      .micro { fill: #67677A; font-size: 9px; letter-spacing: 1.8px; }
+      .item { fill: #A9A9B4; font-size: 10px; }
+      .chip { fill: #17171E; stroke: #33333D; }
+      .chip-t { fill: #BCBCC7; font-size: 9.5px; }
+      .node { fill: #13131A; stroke: #34343F; }
+      .node-t { fill: #E4E4EA; font-size: 11px; font-weight: 700; }
+      .node-s { fill: #7F7F8B; font-size: 8.8px; }
+      .flow { stroke: #565663; stroke-width: 1.4; fill: none; stroke-dasharray: 5 7; animation: dash 1.15s linear infinite; }
+      .live { fill: #4ADE80; animation: blink 2s ease-in-out infinite; }
+      .blip { fill: #67E8F9; animation: blink 2.6s ease-in-out infinite; }
+      .blip2 { fill: #67E8F9; animation: blink 2.6s ease-in-out infinite .9s; }
+      .blip3 { fill: #FCD34D; animation: blink 2.6s ease-in-out infinite 1.6s; }
+      .sweep { transform-box: view-box; transform-origin: 716px 190px; animation: spin 4.5s linear infinite; }
+      .stage { animation: stagePulse 7.5s linear infinite; }
+      @keyframes dash { to { stroke-dashoffset: -24; } }
+      @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .18; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes stagePulse { 0%, 100% { stroke: #34343F; } 8% { stroke: #67E8F9; } 22% { stroke: #34343F; } }
+      @media (prefers-reduced-motion: reduce) {
+        .flow, .live, .blip, .blip2, .blip3, .sweep, .stage { animation: none; }
+      }
+    </style>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bgGlow)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="12" y="12" width="1176" height="606" rx="22" fill="none" stroke="#24242C" stroke-width="1.2"/>
+
+  <g transform="translate(48,41) scale(1.05)">
+    <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" fill="none" stroke="#E8E8EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text class="f" x="84" y="62" font-size="25" font-weight="800" letter-spacing="3" fill="url(#titleGrad)">EU AIR TRAFFIC</text>
+  <text class="f sub" x="86" y="86">live + historical european airspace</text>
+
+  <rect x="928" y="38" width="224" height="32" rx="16" fill="#111118" stroke="#2E2E37"/>
+  <circle class="live" cx="948" cy="54" r="3.5"/>
+  <text class="f chip-t" x="962" y="58">unattended · every 15 min</text>
+
+  <text class="f micro" x="48" y="122">01 · COLLECT</text>
+  <text class="f micro" x="48" y="292">02 · STORE</text>
+  <text class="f micro" x="48" y="458">03 · SERVE</text>
+
+  <rect class="card" x="48" y="132" width="328" height="118" rx="14"/>
+  <text class="f card-title" x="64" y="160">Upstream sources</text>
+  <text class="f sub" x="64" y="178">6 live APIs + Eurostat monthly</text>
+  <circle cx="66" cy="197" r="1.8" fill="#67E8F9"/>
+  <text class="f item" x="76" y="200">OpenSky (movements)</text>
+  <circle cx="66" cy="215" r="1.8" fill="#67E8F9"/>
+  <text class="f item" x="76" y="218">adsb.lol (positions)</text>
+  <circle cx="66" cy="233" r="1.8" fill="#67E8F9"/>
+  <text class="f item" x="76" y="236">airplanes.live</text>
+  <circle cx="208" cy="197" r="1.8" fill="#A78BFA"/>
+  <text class="f item" x="218" y="200">AirLabs (schedules)</text>
+  <circle cx="208" cy="215" r="1.8" fill="#A78BFA"/>
+  <text class="f item" x="218" y="218">aviationweather</text>
+  <circle cx="208" cy="233" r="1.8" fill="#A78BFA"/>
+  <text class="f item" x="218" y="236">Open-Meteo (forecast)</text>
+
+  <path id="pa" class="flow" d="M380 191 H428" marker-end="url(#ah)"/>
+  <path id="pb" class="flow" d="M768 191 H818" marker-end="url(#ah)"/>
+
+  <rect class="card" x="436" y="132" width="328" height="118" rx="14"/>
+  <text class="f card-title" x="452" y="160">VPS collector</text>
+  <text class="f sub" x="452" y="178">2 cores · systemd · no transforms</text>
+  <text class="f item" x="452" y="200">positions · flights · schedules</text>
+  <text class="f item" x="452" y="218">weather · fuel · reference</text>
+  <rect class="chip" x="452" y="226" width="196" height="18" rx="9"/>
+  <text class="f chip-t" x="460" y="239">FastAPI :8090 · Caddy TLS</text>
+  <g opacity="0.85">
+    <circle cx="716" cy="190" r="34" fill="none" stroke="#67E8F9" stroke-opacity="0.16"/>
+    <circle cx="716" cy="190" r="24" fill="none" stroke="#67E8F9" stroke-opacity="0.14"/>
+    <circle cx="716" cy="190" r="13" fill="none" stroke="#67E8F9" stroke-opacity="0.12"/>
+    <line x1="682" y1="190" x2="750" y2="190" stroke="#67E8F9" stroke-opacity="0.1"/>
+    <line x1="716" y1="156" x2="716" y2="224" stroke="#67E8F9" stroke-opacity="0.1"/>
+    <g class="sweep">
+      <path d="M716 190 L716 156 A34 34 0 0 1 744 171 Z" fill="url(#sweepGrad)"/>
+    </g>
+    <circle class="blip" cx="704" cy="178" r="2.2"/>
+    <circle class="blip2" cx="729" cy="200" r="2.2"/>
+    <circle class="blip3" cx="722" cy="172" r="2.2"/>
+  </g>
+
+  <rect class="card" x="824" y="132" width="328" height="118" rx="14"/>
+  <text class="f card-title" x="840" y="160">Aiven Kafka</text>
+  <text class="f sub" x="840" y="178">SASL_SSL · 24h retention</text>
+  <rect class="chip" x="840" y="192" width="90" height="20" rx="10"/>
+  <text class="f chip-t" x="885" y="206" text-anchor="middle">eu-positions</text>
+  <rect class="chip" x="938" y="192" width="79" height="20" rx="10"/>
+  <text class="f chip-t" x="977" y="206" text-anchor="middle">eu-flights</text>
+  <rect class="chip" x="1025" y="192" width="79" height="20" rx="10"/>
+  <text class="f chip-t" x="1064" y="206" text-anchor="middle">eu-weather</text>
+  <rect class="chip" x="840" y="218" width="62" height="20" rx="10"/>
+  <text class="f chip-t" x="871" y="232" text-anchor="middle">eu-fuel</text>
+  <rect class="chip" x="910" y="218" width="90" height="20" rx="10"/>
+  <text class="f chip-t" x="955" y="232" text-anchor="middle">eu-reference</text>
+
+  <path id="pc" class="flow" d="M988 250 V296" marker-end="url(#ah)"/>
+  <circle r="2.6" fill="#67E8F9"><animateMotion dur="1.5s" repeatCount="indefinite"><mpath href="#pc"/></animateMotion></circle>
+
+  <rect class="card" x="48" y="302" width="1104" height="128" rx="14"/>
+  <text class="f card-title" x="64" y="330">Lake &amp; warehouse</text>
+  <text class="f sub" x="1136" y="330" text-anchor="end">plain parquet · dbt owns the transforms</text>
+
+  <rect class="node stage" x="60" y="348" width="192" height="62" rx="10" style="animation-delay:0s"/>
+  <text class="f node-t" x="156" y="376" text-anchor="middle">Bronze</text>
+  <text class="f node-s" x="156" y="392" text-anchor="middle">parquet windows</text>
+
+  <rect class="node stage" x="282" y="348" width="192" height="62" rx="10" style="animation-delay:1.5s"/>
+  <text class="f node-t" x="378" y="376" text-anchor="middle">Silver</text>
+  <text class="f node-s" x="378" y="392" text-anchor="middle">incremental · 11 datasets</text>
+
+  <rect class="node stage" x="504" y="348" width="192" height="62" rx="10" style="animation-delay:3s"/>
+  <text class="f node-t" x="600" y="376" text-anchor="middle">DuckDB</text>
+  <text class="f node-s" x="600" y="392" text-anchor="middle">star schema</text>
+
+  <rect class="node stage" x="726" y="348" width="192" height="62" rx="10" style="animation-delay:4.5s"/>
+  <text class="f node-t" x="822" y="376" text-anchor="middle">dbt</text>
+  <text class="f node-s" x="822" y="392" text-anchor="middle">103 models + tests</text>
+
+  <rect class="node stage" x="948" y="348" width="192" height="62" rx="10" style="animation-delay:6s"/>
+  <text class="f node-t" x="1044" y="376" text-anchor="middle">Gold marts</text>
+  <text class="f node-s" x="1044" y="392" text-anchor="middle">what the site reads</text>
+
+  <path class="flow" d="M256 379 H274" marker-end="url(#ah)"/>
+  <path class="flow" d="M478 379 H496" marker-end="url(#ah)"/>
+  <path class="flow" d="M700 379 H718" marker-end="url(#ah)"/>
+  <path class="flow" d="M922 379 H940" marker-end="url(#ah)"/>
+  <circle r="3" fill="#67E8F9" opacity="0.9"><animateMotion dur="7.5s" repeatCount="indefinite"><mpath href="#pl"/></animateMotion></circle>
+  <path id="pl" d="M72 379 H1128" fill="none" stroke="none"/>
+
+  <path id="pd" class="flow" d="M600 434 V462" marker-end="url(#ah)"/>
+  <path id="pe" class="flow" d="M672 522 H718" marker-end="url(#ah)"/>
+
+  <rect class="card" x="48" y="468" width="620" height="110" rx="14"/>
+  <text class="f card-title" x="64" y="498">Serving copy</text>
+  <rect class="chip" x="64" y="508" width="134" height="22" rx="11"/>
+  <text class="f chip-t" x="131" y="523" text-anchor="middle">Hugging Face lake</text>
+  <rect class="chip" x="208" y="508" width="134" height="22" rx="11"/>
+  <text class="f chip-t" x="275" y="523" text-anchor="middle">MotherDuck warehouse</text>
+  <rect class="chip" x="352" y="508" width="105" height="22" rx="11"/>
+  <text class="f chip-t" x="404" y="523" text-anchor="middle">Turso read-only</text>
+  <text class="f sub" x="64" y="556">shadow-table swaps · mirrored copies · browser failover</text>
+
+  <rect class="card" x="724" y="468" width="428" height="110" rx="14"/>
+  <text class="f card-title" x="740" y="498">React + Vite dashboard</text>
+  <text class="f sub" x="740" y="516">Cloudflare Pages · reads Turso + live API</text>
+  <rect class="chip" x="740" y="528" width="72" height="22" rx="11"/>
+  <text class="f chip-t" x="776" y="543" text-anchor="middle">live map</text>
+  <rect class="chip" x="822" y="528" width="82" height="22" rx="11"/>
+  <text class="f chip-t" x="863" y="543" text-anchor="middle">analytics</text>
+  <rect class="chip" x="914" y="528" width="108" height="22" rx="11"/>
+  <text class="f chip-t" x="968" y="543" text-anchor="middle">SQL workbench</text>
+
+  <circle r="2.6" fill="#67E8F9"><animateMotion dur="1.5s" repeatCount="indefinite"><mpath href="#pa"/></animateMotion></circle>
+  <circle r="2.6" fill="#67E8F9"><animateMotion dur="1.5s" repeatCount="indefinite" begin="0.4s"><mpath href="#pb"/></animateMotion></circle>
+  <circle r="2.6" fill="#67E8F9"><animateMotion dur="1.5s" repeatCount="indefinite" begin="0.2s"><mpath href="#pd"/></animateMotion></circle>
+  <circle r="2.6" fill="#67E8F9"><animateMotion dur="1.5s" repeatCount="indefinite" begin="0.6s"><mpath href="#pe"/></animateMotion></circle>
+</svg>
