@@ -166,6 +166,8 @@ Sane defaults, override only if needed: `POSITIONS_INTERVAL_SECONDS=15`,
   queued), so data keeps arriving even when `schedule` runs late.
 - **Dashboard:** `.github/workflows/bundle.yml` + Cloudflare Pages Git integration.
   Set the `VITE_*` values in Pages → Settings → Variables and secrets (Production).
+  They are inlined at build time, so a changed value only takes effect after a new
+  deployment (Deployments → Retry deployment, a deploy hook, or a push to `main`).
 - **Anywhere else:** `docker/lake-job.Dockerfile` + `scripts/run_lake.sh` runs one
   full cycle in a container (set `HF_SYNC=0` when the dataset is mounted).
 
