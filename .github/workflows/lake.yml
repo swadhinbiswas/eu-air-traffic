@@ -40,6 +40,10 @@ jobs:
       HF_REPO: ${{ vars.HF_REPO || secrets.HF_REPO }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       MOTHERDUCK_DATABASE: ${{ vars.MOTHERDUCK_DATABASE || 'my_db' }}
+      # Serving copy: TURSO_TARGETS spreads (and can mirror) the tables over
+      # several Turso databases/accounts. The legacy single-database variables
+      # below are only used when TURSO_TARGETS is empty.
+      TURSO_TARGETS: ${{ secrets.TURSO_TARGETS }}
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       WAREHOUSE_TARGET: local

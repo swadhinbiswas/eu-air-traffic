@@ -42,6 +42,10 @@ Kafka cluster. Every 15 minutes a scheduled pipeline drains Kafka, builds
 Bronze, Silver and DuckDB layers and dbt marts, then pushes to Hugging Face (the
 dataset lake), MotherDuck (the full warehouse) and Turso (the copy the browser
 is allowed to read). The dashboard reads Turso plus the collector's live API.
+The serving copy is not tied to one database: `TURSO_TARGETS` spreads the tables
+over several Turso databases — typically one per free-tier account — and a table
+listed under more than one target is mirrored, so the browser fails over to
+another copy when an account is down or out of quota.
 
 ### Why two serving stores
 
@@ -50,6 +54,13 @@ read-only tokens to a browser. Turso can, so the site reads a derived, bounded
 copy there instead: small enough to hold cheaply, safe to expose, refreshed
 every cycle. The dashboard's paging totals come from a precomputed
 `site_summary` lookup, so browser polls never scan the fact tables.
+
+Free-tier accounts also carry their own read/write budgets, so the serving copy
+can span a small fleet. Tables named by several targets are mirrored (each copy
+synced and versioned independently), the publisher keeps going when one target
+fails instead of stalling the cycle, and the browser router fails over to a
+healthy copy and stays there while the failed account cools down. No Turso
+replication is involved — every target is an independent database.
 
 The raw and curated lake behind all of this, Bronze windows plus the eleven
 Silver snapshots, is published at
@@ -74,7 +85,7 @@ layout, scripts, cadence, and the dataset card.
 | Kafka: five topics per cluster | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
 | OpenSky: credit budgets per endpoint | `/flights/all` (one request, both ends) + live departures for 4 hubs + a nightly arrivals backfill; ~2.7k of 4k daily credits |
 | AirLabs: 1,000 calls/month, 50 rows/call | Rotating hubs, persisted monthly counter that stops at the budget, IATA→ICAO resolved from bundled data (no extra calls) |
-| Turso: row read/write budget | Dashboard aggregates are precomputed into a one-row `site_summary` lookup; statics upload only when a content hash changes and past a refresh floor; growing tables are watermark-synced; tables the site no longer needs are dropped from the serving copy |
+| Turso: row read/write budget | Dashboard aggregates are precomputed into a one-row `site_summary` lookup; statics upload only when a content hash changes and past a refresh floor; growing tables are watermark-synced; tables the site no longer needs are dropped from the serving copy; the copy is spread over several free-tier accounts (`TURSO_TARGETS`), with mirrored tables and browser-side failover |
 | Object storage: storage and commit budget | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
 | CI runners: shared and ephemeral | Frontend-only pushes skip the lake entirely, and the job fails fast instead of retrying silently |
 | VPS: 2 cores | The box only collects; all transformation runs in CI |
@@ -129,8 +140,9 @@ AIR_TRAFFIC_DUCKDB_PATH=$PWD/warehouse/air_traffic.duckdb uv run dbt build --pro
 | `AIRLABS_API_KEY` | Schedules; the source is skipped without it |
 | `HF_TOKEN`, `HF_REPO` | Dataset lake |
 | `MOTHERDUCK_TOKEN`, `MOTHERDUCK_DATABASE` | Warehouse |
-| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Serving copy (publisher uses the read-write token) |
-| `VITE_LIVE_URL`, `VITE_TURSO_URL`, `VITE_TURSO_TOKEN` | Dashboard build-time values; the Turso token must be read-only |
+| `TURSO_TARGETS` | JSON array of `{name,url,token,tables}` serving databases; a table listed in several targets is mirrored for read failover (publisher uses the read-write tokens) |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Legacy single serving database, used only when `TURSO_TARGETS` is empty |
+| `VITE_LIVE_URL`, `VITE_TURSO_TARGETS`, `VITE_TURSO_URL`, `VITE_TURSO_TOKEN` | Dashboard build-time values; every Turso token must be read-only |
 
 Sane defaults, override only if needed: `POSITIONS_INTERVAL_SECONDS=15`,
 `POSITIONS_PUBLISH_INTERVAL_SECONDS=300`, `FLIGHTS_INTERVAL_SECONDS=1800`,
@@ -149,7 +161,7 @@ Sane defaults, override only if needed: `POSITIONS_INTERVAL_SECONDS=15`,
   dispatches the lake from the VPS every 15 minutes (skipping when one is already
   queued), so data keeps arriving even when `schedule` runs late.
 - **Dashboard:** `.github/workflows/bundle.yml` + Cloudflare Pages Git integration.
-  Set the four `VITE_*` values in Pages → Settings → Variables and secrets (Production).
+  Set the `VITE_*` values in Pages → Settings → Variables and secrets (Production).
 - **Anywhere else:** `docker/lake-job.Dockerfile` + `scripts/run_lake.sh` runs one
   full cycle in a container (set `HF_SYNC=0` when the dataset is mounted).
 

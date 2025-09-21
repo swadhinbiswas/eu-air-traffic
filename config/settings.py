@@ -92,18 +92,28 @@ class Settings(BaseSettings):
     # Gold marts + precomputed site payloads are published here after dbt and
     # read by the site for fast, always-current analytics. One-way and derived:
     # MotherDuck remains authoritative.
+    #
+    # Free-tier accounts have independent read/write budgets, so TURSO_TARGETS
+    # spreads the serving copy over several databases (each possibly a separate
+    # Turso account). A table listed under more than one target is mirrored, and
+    # the browser fails over to the next copy when its preferred target is down
+    # or exhausted. `site_summary` is always written to every target so a
+    # failover never loses the precomputed aggregates. See
+    # scripts/publish_turso.py for the schema and routing rules.
+    turso_targets: str | None = Field(
+        default=None,
+        description=(
+            'JSON array of {"name","url","token","tables"} targets. An empty '
+            '"tables" (or "*") means every serving table; a table present in '
+            "several targets is mirrored for read failover."
+        ),
+    )
+    # Legacy single-database variables, kept as a fallback when TURSO_TARGETS is
+    # unset (existing deployments keep working unchanged).
     turso_database_url: str | None = Field(
-        default=None, description="libSQL/Turso URL, e.g. libsql://my-db-org.turso.io"
+        default=None, description="Legacy single-database URL; used when TURSO_TARGETS is unset"
     )
     turso_auth_token: str | None = Field(default=None)
-    turso_serving_enabled: bool = Field(default=True)
-    turso_sync_tables: str = Field(
-        default="gold_airport_metrics,gold_airline_rankings,gold_delay_analysis,"
-        "gold_weather_impact,gold_seasonal_trends,gold_fuel_price_series,"
-        "gold_aircraft_class_mix,fact_positions,dim_airport,dim_aircraft,dim_route,"
-        "fact_emissions,fact_flights,weather",
-        description="Comma-separated warehouse tables copied to Turso",
-    )
 
     # ── Live API (single endpoint served from the VPS collector) ─────────
     live_api_host: str = Field(default="0.0.0.0")
