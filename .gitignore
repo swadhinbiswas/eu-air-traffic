@@ -50,3 +50,13 @@ logs/
 .idea/
 .vscode/
 *.swp
+
+# Terraform (infra/terraform): state and provider plugins are never committed;
+# .terraform.lock.hcl and *.tfvars.example are.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+terraform.tfvars
+backend.tf

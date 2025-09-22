@@ -1,0 +1,67 @@
+# Copy to terraform.tfvars and adjust. Values here are the module defaults
+# repeated so the file documents what can be changed; uncomment what you touch.
+#
+# The only values with no safe default are an email address for alarms and,
+# ideally, an ACM certificate for the live API and dashboard domains.
+
+# ── Identity ─────────────────────────────────────────────────────────────────
+# name_prefix = "eu-air-traffic"
+# environment = "production"
+aws_region = "eu-central-1"
+
+# tags = {
+#   Owner   = "platform"
+#   CostCode = "data-eng"
+# }
+
+# ── Networking ───────────────────────────────────────────────────────────────
+# vpc_cidr                = "10.42.0.0/16"
+# az_count                = 3
+# single_nat_gateway      = true   # set false for per-AZ NAT in production
+# enable_interface_endpoints = false
+
+# ── Images ───────────────────────────────────────────────────────────────────
+# image_tag = "latest"   # CI sets this to the short git SHA
+# collector_image = ""
+# lake_image      = ""
+
+# ── Collector ────────────────────────────────────────────────────────────────
+# collector_desired_count = 1
+# collector_cpu           = 1024
+# collector_memory        = 2048
+
+# ── Kafka / MSK ──────────────────────────────────────────────────────────────
+# msk_instance_type     = "kafka.t3.small"
+# msk_broker_count      = 3
+# lake_window_seconds   = 540
+# kafka_retention_hours = 24
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+# lake_bucket_name = ""   # empty derives <name_prefix>-lake-<account_id>
+# web_bucket_name  = ""
+# s3_prefix        = ""
+
+# ── TLS / live API ───────────────────────────────────────────────────────────
+# acm_certificate_arn  = "arn:aws:acm:eu-central-1:123456789012:certificate/..."
+# live_api_public_url  = "https://live.example.com"
+
+# ── Warehouse / serving ──────────────────────────────────────────────────────
+# enable_redshift        = true
+# redshift_base_capacity = 8
+# aurora_min_acu         = 0.5
+# aurora_max_acu         = 4
+# aurora_reader_count    = 1
+# manage_aurora_reader_role = false   # opt-in psql provisioner; see README
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+# cloudfront_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+# cloudfront_aliases             = ["analytics.example.com"]
+# cloudfront_price_class         = "PriceClass_100"
+
+# ── Alerts ───────────────────────────────────────────────────────────────────
+alarm_email = "you@example.com"
+
+# ── CI/CD ────────────────────────────────────────────────────────────────────
+# github_repository    = "swadhinbiswas/eu-air-traffic"
+# github_deploy_branch = "main"
+# create_github_oidc_provider = true

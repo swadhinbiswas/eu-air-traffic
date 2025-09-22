@@ -1,11 +1,12 @@
-"""Lake sync — move Bronze/Silver between the local workspace and Hugging Face.
+"""Lake sync — move Bronze/Silver between the local workspace and the lake.
 
 The GitHub Actions jobs are stateless, so each one pulls the layer it needs,
-transforms it, and pushes the result back:
+transforms it, and pushes the result back. The store is Hugging Face by default;
+``LAKE_BACKEND=s3`` runs the identical sequence against S3 (the AWS lake):
 
-    python -m scripts.lake_sync pull-bronze    # HF bronze/  → warehouse/bronze/
-    python -m scripts.lake_sync push-silver    # warehouse/silver/ → HF silver/
-    python -m scripts.lake_sync pull-silver    # HF silver/ → warehouse/silver/
+    python -m scripts.lake_sync pull-bronze    # bronze/  → warehouse/bronze/
+    python -m scripts.lake_sync push-silver    # warehouse/silver/ → silver/
+    python -m scripts.lake_sync pull-silver    # silver/ → warehouse/silver/
     python -m scripts.lake_sync status
 """
 
@@ -16,7 +17,7 @@ import sys
 
 from config.logging import logger, setup_logging
 from config.settings import settings
-from services import hf_lake
+from services import lake_backend
 
 
 def _assert_not_mock(action: str) -> None:
@@ -33,27 +34,27 @@ def _assert_not_mock(action: str) -> None:
 
 
 def pull_bronze() -> int:
-    return hf_lake.download_prefix(
+    return lake_backend.download_prefix(
         f"{settings.hf_bronze_prefix}/parquet", settings.warehouse_dir, app_settings=settings
     )
 
 
 def push_silver() -> int:
     _assert_not_mock("push silver")
-    return hf_lake.upload_directory(
+    return lake_backend.upload_directory(
         settings.silver_dir, settings.hf_silver_prefix, app_settings=settings
     )
 
 
 def pull_silver() -> int:
-    return hf_lake.download_prefix(
+    return lake_backend.download_prefix(
         settings.hf_silver_prefix, settings.warehouse_dir, app_settings=settings
     )
 
 
 def status() -> int:
-    enabled = hf_lake.hf_enabled(settings)
-    print(f"hf_enabled={enabled} repo={settings.huggingface_repo}")
+    backend = lake_backend.get_lake_backend(settings)
+    print(f"lake_backend={backend.name} enabled={backend.enabled} store={backend.describe()}")
     print(f"bronze_prefix={settings.hf_bronze_prefix} silver_prefix={settings.hf_silver_prefix}")
     return 0
 

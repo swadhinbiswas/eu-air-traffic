@@ -1,0 +1,144 @@
+name: Deploy (AWS)
+
+# Provisions the AWS stack with Terraform and ships both container images.
+#
+# Authentication is keyless: the job assumes an IAM role via GitHub's OIDC
+# provider, so no long-lived AWS access key is stored in the repository. The
+# role's trust policy is restricted to this repository's `main` branch
+# (see infra/terraform/iam.tf). `terraform plan` runs on every relevant push;
+# `apply` only runs from a manual dispatch, behind the protected `production`
+# GitHub environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Run terraform apply (otherwise plan only)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - "docker/**"
+      - "config/**"
+      - "services/**"
+      - "scripts/**"
+      - "pipelines/**"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+  id-token: write # required for the OIDC token exchange
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  terraform:
+    name: Terraform plan / apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.apply && 'production' || '' }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.1"
+
+      - name: Configure remote state
+        # Shared S3 state so a plan/apply is not lost between runners. Skip when
+        # TF_STATE_BUCKET is unset (local state, suitable only for a scratch run).
+        if: vars.TF_STATE_BUCKET != ''
+        run: |
+          cat > backend.tf <<EOF
+          terraform {
+            backend "s3" {
+              bucket       = "${{ vars.TF_STATE_BUCKET }}"
+              key          = "eu-air-traffic/terraform.tfstate"
+              region       = "${{ env.AWS_REGION }}"
+              encrypt      = true
+              use_lockfile = true
+            }
+          }
+          EOF
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Apply
+        if: github.event_name == 'workflow_dispatch' && inputs.apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+  images:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the collector
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.collector
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/eu-air-traffic/collector:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/eu-air-traffic/collector:latest
+          cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/eu-air-traffic/collector:buildcache
+          cache-to: type=registry,ref=${{ steps.ecr.outputs.registry }}/eu-air-traffic/collector:buildcache,mode=max
+
+      - name: Build and push the lake job
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/lake-job.Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/eu-air-traffic/lake-job:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/eu-air-traffic/lake-job:latest
+
+      - name: Roll the collector service
+        run: |
+          aws ecs update-service \
+            --cluster eu-air-traffic \
+            --service eu-air-traffic-collector \
+            --force-new-deployment

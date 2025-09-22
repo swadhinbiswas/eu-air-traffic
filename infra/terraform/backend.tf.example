@@ -1,0 +1,26 @@
+# Remote state for the AWS stack (optional but strongly recommended).
+#
+# Copy this file to `backend.tf` (which is gitignored) and fill in the bucket,
+# then run `terraform init -migrate-state`:
+#
+#     cp backend.tf.example backend.tf
+#     terraform init -migrate-state
+#
+# In CI the deploy workflow (`.github/workflows/deploy-aws.yml`) generates this
+# file from the `TF_STATE_BUCKET` repository variable, so the state is shared
+# between runs instead of being thrown away on every runner.
+#
+# `use_lockfile` uses S3's native conditional-write locking and needs Terraform
+# 1.10 or newer (see versions.tf). If you are pinned to an older Terraform, use
+# a DynamoDB lock table instead:
+#
+#     dynamodb_table = "my-terraform-locks"
+terraform {
+  backend "s3" {
+    bucket       = "my-terraform-state"
+    key          = "eu-air-traffic/terraform.tfstate"
+    region       = "eu-central-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

@@ -42,6 +42,7 @@ dev = [
     "mypy>=1.10.0",
     "dbt-duckdb>=1.8.0",
     "httpx>=0.27.0",
+    "moto[s3]>=5.0",
 ]
 # VPS collector service: Kafka event bus + live relay.
 stream = [
@@ -50,6 +51,14 @@ stream = [
 # Turso (libSQL) serving layer for the dashboard.
 turso = [
     "libsql-client>=0.3.1",
+]
+# AWS backends: S3 data lake, secrets, and the IAM/RDS plumbing.
+aws = [
+    "boto3>=1.34",
+]
+# Aurora PostgreSQL serving layer (the AWS replacement for Turso).
+postgres = [
+    "psycopg[binary]>=3.1",
 ]
 # Build-time only: regenerates services/data/emission_openap.json.
 openap = [

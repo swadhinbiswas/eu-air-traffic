@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- AWS deployment stack and backends, as the first worked migration of the
+  "Running it at scale" paths. This is a reference implementation that is **not
+  currently provisioned** — the live deployment stays on free tiers — but the
+  application code it needs runs unchanged.
+  - `infra/terraform/` — a Terraform root module for the AWS stack (VPC, ECR,
+    Secrets Manager, S3 lake, Glue catalog, MSK, ECS/Fargate collector + lake
+    job, ALB, Step Functions + EventBridge Scheduler, Aurora PostgreSQL,
+    Redshift Serverless, CloudFront, CloudWatch alarms), plus a
+    `deploy-aws.yml` workflow that deploys keylessly through a GitHub OIDC role.
+  - `services/lake_backend.py` — a lake abstraction (`hf` | `s3` | `local`)
+    selected by `LAKE_BACKEND`. The sink and `scripts/lake_sync.py` go through
+    it, so Bronze/Silver can live on S3 with no change to the callers. The S3
+    backend keeps the "unchanged file is a no-op" rule by comparing sizes.
+  - `scripts/publish_aurora.py` — the Aurora PostgreSQL serving publisher
+    (`SERVING_BACKEND=aurora`), the AWS counterpart to the Turso publisher: the
+    same shadow-table swap, watermark upserts and precomputed `site_summary`,
+    with optional short-lived RDS IAM auth.
+  - `scripts/publish_metrics.py` — emits the `LastSuccessfulCycleAgeSeconds`
+    custom metric the CloudWatch freshness alarm watches, at the end of every
+    lake cycle (`LAKE_METRICS_ENABLED=1`); the Terraform grants the lake task
+    `cloudwatch:PutMetricData`.
+  - AWS settings in `config/settings.py` (`LAKE_BACKEND`, `S3_BUCKET`,
+    `S3_PREFIX`, `AWS_REGION`, `DATABASE_URL`, `SERVING_DATABASE_URL`,
+    `AURORA_IAM_AUTH`, `PG_SCHEMA`) and an `aws` / `postgres` dependency extra.
+  - `docs/aws-architecture.md` (service-by-service mapping and trade-offs) and
+    `docs/aws-deployment.md` (the deployment runbook).
 - Multi-database Turso serving. `TURSO_TARGETS` (publisher) and
   `VITE_TURSO_TARGETS` (dashboard) describe a fleet of independent Turso
   databases, usually one per free-tier account. Tables are assigned per target,

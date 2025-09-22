@@ -9,8 +9,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --extra dev --extra stream --extra turso --no-install-project
+RUN uv sync --extra dev --extra stream --extra turso --extra aws --extra postgres --no-install-project
 COPY . .
-RUN uv sync --extra dev --extra stream --extra turso
+RUN uv sync --extra dev --extra stream --extra turso --extra aws --extra postgres
 
 ENTRYPOINT ["bash", "scripts/run_lake.sh"]

@@ -111,8 +111,9 @@ layout, scripts, cadence, and the dataset card.
 │   └── sources/         #   one module per upstream data product
 ├── pipelines/           # silver (incremental), warehouse (star schema), quality, orchestrator
 ├── dbt/                 # staging → intermediate → marts → reports + tests
-├── scripts/             # lake_sync, publish_{motherduck,turso,site_tables}, fetch_eurostat, …
+├── scripts/             # lake_sync, publish_{motherduck,turso,aurora,site_tables}, fetch_eurostat, …
 ├── web/                 # React + Vite dashboard (Turso + live API)
+├── infra/terraform/     # AWS stack as code (see docs/aws-deployment.md)
 ├── deploy/              # systemd unit, Caddyfile
 ├── docker/              # lake job image (runs the cycle anywhere)
 └── tests/               # unit + e2e (pytest)
@@ -196,6 +197,19 @@ warehouse at any time.
 The right column is the migration path this codebase is shaped for, not what is
 running today. What this repository deploys is the left column, and the
 container path under `docker/` is the one that has been exercised end to end.
+
+For a concrete worked example of one of those migrations, see
+[`docs/aws-architecture.md`](docs/aws-architecture.md) (service-by-service
+mapping to AWS, with the trade-offs) and
+[`docs/aws-deployment.md`](docs/aws-deployment.md) (a step-by-step deployment
+runbook: secrets, ECR, ECS, MSK, S3/Iceberg, Redshift, Aurora, CloudFront,
+observability, costs and teardown).
+
+To be explicit: **the AWS stack is a reference implementation, shipped as code
+to show the scale path — it is not currently provisioned.** What runs today is
+the left column: the collector, the GitHub Actions pipeline and the free-tier
+serving stores, every cycle, at zero cost. `infra/terraform/` is there to prove
+the same code deploys unchanged at scale, not to describe the live system.
 
 | Part | Here | Production swap |
 |---|---|---|
