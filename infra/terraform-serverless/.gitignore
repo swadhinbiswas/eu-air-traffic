@@ -1,0 +1,4 @@
+# Terraform build output for this module. The Lambda zip is produced by
+# data "archive_file" at plan time; the repo root .gitignore already ignores
+# state and provider plugins.
+build/

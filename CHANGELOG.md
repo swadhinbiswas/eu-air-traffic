@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `AURORA_IAM_AUTH`, `PG_SCHEMA`) and an `aws` / `postgres` dependency extra.
   - `docs/aws-architecture.md` (service-by-service mapping and trade-offs) and
     `docs/aws-deployment.md` (the deployment runbook).
+- The AWS version: a serverless analytics plane that sits beside the existing
+  pipeline without touching the collector — Lambda export → S3 raw landing zone
+  → Glue Crawler → Glue ETL (PySpark) → S3 curated zone → Athena → BI. The
+  application code is in `aws/` (bronze-export Lambda, Glue transform, Athena
+  DDL and queries), the infrastructure in `infra/terraform-serverless/`, and the
+  build guide in `docs/aws-version.md`. The raw zone is append-only and the
+  curated zone is derived, so both can be rebuilt; the reference implementation
+  is not currently deployed.
 - Multi-database Turso serving. `TURSO_TARGETS` (publisher) and
   `VITE_TURSO_TARGETS` (dashboard) describe a fleet of independent Turso
   databases, usually one per free-tier account. Tables are assigned per target,
