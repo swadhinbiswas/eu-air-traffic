@@ -52,6 +52,112 @@ const blankMapStyle: MapLibreGL.StyleSpecification = {
   ],
 };
 
+/**
+ * Probe for a usable WebGL2 context *before* constructing the MapLibre map.
+ * MapLibre v5+ renders exclusively on WebGL2 and its constructor throws a
+ * `GPUInitializationError` ("WebGL2 is required to display this map…") when
+ * the browser cannot provide one — headless browsers, very old browsers,
+ * disabled hardware acceleration, or blocked GPU processes. Pre-checking lets
+ * us render an actionable in-place fallback instead of crashing the view.
+ */
+export function isWebGL2Supported(): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", {
+      failIfMajorPerformanceCaveat: false,
+    }) as WebGL2RenderingContext | null;
+    if (!gl) return false;
+    // Release the probe context immediately; we only wanted the answer.
+    const lose = gl.getExtension("WEBGL_lose_context");
+    lose?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True for MapLibre's constructor failure when no WebGL2 context exists. */
+export function isGPUInitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { name?: string; message?: string };
+  if (err.name === "GPUInitializationError") return true;
+  return (
+    typeof err.message === "string" &&
+    /webgl2 is required|webgl/i.test(err.message)
+  );
+}
+
+const WEBGL_HELP_URL =
+  "https://wiki.openstreetmap.org/wiki/This_map_requires_WebGL";
+
+/**
+ * In-place replacement rendered when no WebGL2 context is available.
+ * Keeps the layout's height so surrounding HUD/tables don't jump, explains
+ * the cause, and offers a retry (e.g. after enabling hardware acceleration).
+ */
+export function MapFallback({
+  detail,
+  onRetry,
+  className,
+}: {
+  detail?: string | null;
+  onRetry?: () => void;
+  className?: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "grid h-full w-full place-items-center overflow-auto rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-6 text-center",
+        className,
+      )}
+    >
+      <div className="max-w-md">
+        <p className="text-sm font-medium text-amber-200">
+          3D map unavailable — this browser provided no WebGL2 context
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+          MapLibre renders exclusively on WebGL2. Your data below is unaffected;
+          only the GPU-accelerated canvas could not start.
+          {detail ? (
+            <span className="mt-1 block font-mono text-[11px] text-zinc-500">
+              {detail}
+            </span>
+          ) : null}
+        </p>
+        <ul className="mx-auto mt-3 max-w-sm list-disc space-y-1 pl-5 text-left text-xs text-zinc-400">
+          <li>Use a current Chrome, Edge, Firefox, or Safari release.</li>
+          <li>
+            Enable hardware acceleration / WebGL in the browser settings, then
+            reload.
+          </li>
+          <li>Update GPU drivers; disable extensions that block canvases.</li>
+        </ul>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="rounded-md border border-amber-500/30 px-3 py-1.5 text-xs text-amber-200 transition-colors hover:bg-amber-500/10"
+            >
+              Retry map
+            </button>
+          )}
+          <a
+            href={WEBGL_HELP_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/5"
+          >
+            About WebGL2
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Prevent equivalent inline style objects from triggering a full map style reload.
 function useStableValue<T>(value: T): T {
   const key = useMemo(() => JSON.stringify(value) ?? "", [value]);
@@ -256,6 +362,8 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   const [isLoaded, setIsLoaded] = useState(false);
   const [isStyleLoaded, setIsStyleLoaded] = useState(false);
   const [pendingStyle, setPendingStyle] = useState<MapStyleOption | null>(null);
+  const [webglError, setWebglError] = useState<Error | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const currentStyleRef = useRef<MapStyleOption | null>(null);
   const styleSwapInFlightRef = useRef(false);
   const internalUpdateRef = useRef(false);
@@ -286,24 +394,55 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   // Expose the map instance to the parent component
   useImperativeHandle(ref, () => mapInstance as MapLibreGL.Map, [mapInstance]);
 
-  // Initialize the map
+  // Initialize the map. Never let a missing WebGL2 context escape as an
+  // uncaught render error: pre-check, catch the constructor's
+  // GPUInitializationError, and watch for async context loss.
   useEffect(() => {
     if (!containerRef.current) return;
+
+    if (!isWebGL2Supported()) {
+      setWebglError(
+        new Error(
+          "WebGL2 is unavailable in this browser (pre-check found no webgl2 context).",
+        ),
+      );
+      return;
+    }
 
     const initialStyle =
       resolvedTheme === "dark" ? mapStyles.dark : mapStyles.light;
     currentStyleRef.current = initialStyle;
 
-    const map = new MapLibreGL.Map({
-      container: containerRef.current,
-      style: initialStyle,
-      renderWorldCopies: false,
-      attributionControl: {
-        compact: true,
-      },
-      ...props,
-      ...viewport,
-    });
+    // Drop any half-initialised DOM a previous failed constructor left
+    // behind (MapLibre mutates the container before _setupPainter throws).
+    containerRef.current.innerHTML = "";
+
+    let map: MapLibreGL.Map | null = null;
+    try {
+      map = new MapLibreGL.Map({
+        container: containerRef.current,
+        style: initialStyle,
+        renderWorldCopies: false,
+        attributionControl: {
+          compact: true,
+        },
+        ...props,
+        // Accept software-GL fallbacks (SwiftShader etc.) where the browser
+        // offers them instead of failing outright. Spread last so the
+        // permissive default survives even when callers pass their own attrs.
+        canvasContextAttributes: {
+          failIfMajorPerformanceCaveat: false,
+          ...(props.canvasContextAttributes ?? {}),
+        },
+        ...viewport,
+      });
+    } catch (error) {
+      containerRef.current.innerHTML = "";
+      setWebglError(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return;
+    }
 
     const styleLoadHandler = () => {
       styleSwapInFlightRef.current = false;
@@ -317,22 +456,49 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       onViewportChangeRef.current?.(getViewport(map));
     };
 
+    // Async GPU failures (e.g. context recreation after restore) surface as
+    // map "error" events — capture them instead of crashing the view.
+    const handleMapError = (e: { error?: unknown }) => {
+      if (e?.error && isGPUInitError(e.error)) {
+        setWebglError(
+          e.error instanceof Error ? e.error : new Error(String(e.error)),
+        );
+      }
+    };
+
+    // A lost context blanks the canvas; surface the fallback with a retry
+    // rather than leaving a frozen frame. `preventDefault` allows a later
+    // `webglcontextrestored`; either way the user gets guidance + retry.
+    const canvas = map.getCanvas();
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      setWebglError(
+        new Error(
+          "The GPU context was lost (browser reclaimed WebGL resources).",
+        ),
+      );
+    };
+
     map.on("load", loadHandler);
     map.on("style.load", styleLoadHandler);
     map.on("move", handleMove);
+    map.on("error", handleMapError);
+    canvas.addEventListener("webglcontextlost", handleContextLost);
     setMapInstance(map);
 
     return () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
       map.off("load", loadHandler);
       map.off("style.load", styleLoadHandler);
       map.off("move", handleMove);
+      map.off("error", handleMapError);
       map.remove();
       setIsLoaded(false);
       setIsStyleLoaded(false);
       setMapInstance(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retryKey]);
 
   // Sync controlled viewport to map
   useEffect(() => {
@@ -402,6 +568,33 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     }),
     [mapInstance, isLoaded, isStyleLoaded, resolvedTheme],
   );
+
+  const handleRetry = useCallback(() => {
+    setWebglError(null);
+    setIsLoaded(false);
+    setIsStyleLoaded(false);
+    setMapInstance(null);
+    setRetryKey((k) => k + 1);
+  }, []);
+
+  if (webglError) {
+    return (
+      <div
+        ref={containerRef}
+        className={cn("relative h-full w-full", className)}
+      >
+        <MapFallback
+          detail={
+            webglError.message.length > 220
+              ? `${webglError.message.slice(0, 220)}…`
+              : webglError.message
+          }
+          onRetry={handleRetry}
+          className="absolute inset-0"
+        />
+      </div>
+    );
+  }
 
   return (
     <MapContext.Provider value={contextValue}>
