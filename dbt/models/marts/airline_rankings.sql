@@ -1,31 +1,32 @@
-{{ config(materialized='view') }}
+{{ config(materialized='view', tags=['marts']) }}
 
-with fact_flights as (
-    select * from {{ ref('stg_fact_flights') }}
+with flight_details as (
+    select * from {{ ref('int_flight_details') }}
 ),
 
-airlines as (
-    select airline_icao, airline_name from main.dim_airline
+airline_stats as (
+    select
+        airline_icao,
+        airline_name,
+        count(*) as total_flights,
+        round(avg(delay_minutes), 2) as avg_delay_minutes,
+        round(avg(case when is_on_time then 1.0 else 0.0 end), 4) as on_time_rate,
+        sum(case when status = 'cancelled' then 1 else 0 end) as cancelled_flights,
+        count(distinct departure_icao) as unique_departure_airports,
+        count(distinct arrival_icao) as unique_arrival_airports
+    from flight_details
+    where airline_icao is not null
+    group by airline_icao, airline_name
 ),
 
 ranked as (
     select
-        f.airline_icao,
-        a.airline_name,
-        count(*) as total_flights,
-        round(avg(f.delay_minutes), 2) as avg_delay_minutes,
-        round(avg(case when f.delay_minutes <= 15 then 1.0 else 0.0 end), 4) as on_time_rate
-    from fact_flights f
-    left join airlines a on f.airline_icao = a.airline_icao
-    where f.status != 'cancelled'
-    group by f.airline_icao, a.airline_name
+        *,
+        row_number() over (order by avg_delay_minutes asc) as rank,
+        round(avg_delay_minutes - lag(avg_delay_minutes) over (order by avg_delay_minutes), 2) as delay_gap_from_previous
+    from airline_stats
 )
 
-select
-    airline_icao,
-    airline_name,
-    total_flights,
-    avg_delay_minutes,
-    on_time_rate,
-    row_number() over (order by avg_delay_minutes asc) as rank
+select *
 from ranked
+order by rank

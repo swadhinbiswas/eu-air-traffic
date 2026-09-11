@@ -2,11 +2,14 @@
 
 Flow (matches the documented Medallion architecture):
 
-    collect → bronze → silver → gold → warehouse (DuckDB) → optional HF upload
+    collect → bronze → silver → warehouse (DuckDB) → gold (dbt) → quality → HF
 
 Each step is isolated and idempotent. A failure in a non-critical collector is
 logged and skipped (graceful degradation); a failure in a data-processing step
 aborts the run with a non-zero exit code so the scheduler can alert.
+
+Note: the 24/7 live feed is owned by :mod:`services.collector` (VPS) + Kafka +
+:mod:`services.sink`; this orchestrator is the local/CI batch path.
 
 Run with: ``python -m pipelines.orchestrator``
 """
@@ -90,15 +93,16 @@ class Orchestrator:
         report = PipelineReport()
         logger.info("=== pipeline run starting (mock_mode=%s) ===", self.settings.mock_mode)
 
+        # Step 1: Batch collection
         _step(report, "collect", self.collect)
         if report.success:
             _step(report, "bronze", self._bronze)
         if report.success:
             _step(report, "silver", self._silver)
         if report.success:
-            _step(report, "gold", self._gold)
-        if report.success:
             _step(report, "warehouse", self._warehouse)
+        if report.success:
+            _step(report, "gold", self._gold)
         if report.success:
             _step(report, "quality", self._quality)
         if report.success and self.settings.huggingface_token:
@@ -136,10 +140,86 @@ class Orchestrator:
 
         return run_all(app_settings=self.settings)
 
-    def _gold(self) -> dict[str, int]:
+    def _gold(self) -> dict[str, Any]:
+        """Build the Gold layer: dbt marts plus a portable Parquet export.
+
+        Two complementary outputs are produced:
+
+        1. **dbt marts** — the authoritative business logic, materialised as
+           views in the DuckDB ``marts`` schema by ``dbt build``.
+        2. **Gold Parquet** — a Polars-computed export under ``warehouse/gold/``
+           used for the Hugging Face data lake and offline consumers.
+
+        ``gold_*`` views in the ``main`` schema are registered from the dbt
+        marts when available, otherwise from the Parquet export, so downstream
+        consumers always have an analytics surface.
+        """
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        # Portable Gold export (always produced for HF / offline use).
         from pipelines.gold import build_marts
 
-        return build_marts(self.settings)
+        counts = build_marts(self.settings)
+
+        dbt_dir = str(self.settings.dbt_project_dir)
+        logger.info("[orchestrator] Running dbt build in %s", dbt_dir)
+
+        # Resolve the dbt executable: PATH first, then the active interpreter's
+        # bin directory (so `python -m pipelines.orchestrator` works without an
+        # activated virtualenv).
+        dbt_exe = shutil.which("dbt")
+        if dbt_exe is None:
+            candidate = Path(sys.executable).parent / "dbt"
+            if candidate.exists():
+                dbt_exe = str(candidate)
+
+        dbt_ok = False
+        dbt_output = ""
+        if dbt_exe is None:
+            logger.warning("[orchestrator] dbt executable not found — using Parquet Gold export")
+        else:
+            # Point dbt at the same DuckDB file as this pipeline run.
+            env = {**os.environ, "AIR_TRAFFIC_DUCKDB_PATH": str(self.settings.duckdb_path)}
+            try:
+                result = subprocess.run(
+                    [dbt_exe, "build", "--profiles-dir", "."],
+                    cwd=dbt_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    check=False,
+                    env=env,
+                )
+                dbt_ok = result.returncode == 0
+                dbt_output = (result.stdout or result.stderr or "")[-500:]
+                if not dbt_ok:
+                    logger.warning(
+                        "[orchestrator] dbt build failed — using Parquet Gold export:\n%s",
+                        result.stderr[-500:],
+                    )
+            except (FileNotFoundError, subprocess.SubprocessError) as exc:
+                logger.warning(
+                    "[orchestrator] dbt unavailable (%s) — using Parquet Gold export", exc
+                )
+
+        # Register Gold as gold_* views in the main schema. The builder prefers
+        # the dbt ``marts`` schema and falls back to the Gold Parquet export.
+        from pipelines.warehouse import WarehouseBuilder
+
+        builder = WarehouseBuilder(self.settings)
+        try:
+            builder.register_dbt_gold_views()
+        finally:
+            builder.close()
+
+        return {
+            "status": "ok" if dbt_ok else "fallback_parquet",
+            "gold_marts": counts,
+            "dbt_output": dbt_output,
+        }
 
     def _warehouse(self) -> dict[str, int]:
         from pipelines.warehouse import build

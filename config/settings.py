@@ -1,13 +1,24 @@
 """Application settings, loaded from environment variables and `.env` files.
 
 All secrets live in environment variables / `.env` (never in source code).
+
+The platform has three planes:
+
+* **Edge (VPS)** — the always-on :mod:`services.collector` polls every upstream
+  aviation API and publishes normalised records to Kafka, while serving a single
+  live snapshot API to the dashboard.
+* **Lake (Hugging Face)** — :mod:`services.sink` drains Kafka into immutable
+  Bronze Parquet, and the GitHub Actions workflows transform Bronze → Silver and
+  publish both layers back to the dataset.
+* **Warehouse (MotherDuck)** — dbt builds the Gold marts that back the
+  analytics, stories, catalog, explorer, SQL, ops and docs pages.
 """
 
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -22,8 +33,117 @@ class Settings(BaseSettings):
     opensky_password: str | None = Field(default=None)
     opensky_client_id: str | None = Field(default=None)
     opensky_client_secret: str | None = Field(default=None)
-    huggingface_token: str | None = Field(default=None)
-    huggingface_repo: str = Field(default="air-traffic-warehouse/air-traffic")
+
+    # ── Hugging Face dataset (the data lake) ───────────────────────────────
+    # ``HF_TOKEN`` / ``HF_REPO`` are the documented names; the longer aliases
+    # keep backwards compatibility with older deployments.
+    huggingface_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACE_TOKEN"),
+    )
+    huggingface_repo: str = Field(
+        default="air-traffic-warehouse/air-traffic",
+        validation_alias=AliasChoices("HF_REPO", "HUGGINGFACE_REPO"),
+    )
+    hf_bronze_prefix: str = Field(default="bronze")
+    hf_silver_prefix: str = Field(default="silver")
+    hf_gold_prefix: str = Field(default="gold")
+    hf_private: bool = Field(default=True)
+
+    # ── Kafka event bus (Aiven) ──────────────────────────────────────────
+    aiven_kafka_host: str | None = Field(default=None)
+    aiven_kafka_port: int = Field(default=12345, ge=1)
+    aiven_kafka_username: str | None = Field(default=None)
+    aiven_kafka_password: str | None = Field(default=None)
+    aiven_kafka_ca_cert: str | None = Field(
+        default=None, description="Path to the Aiven CA certificate (.pem)"
+    )
+    kafka_security_protocol: str = Field(
+        default="SASL_SSL", description="SASL_SSL for Aiven; PLAINTEXT for local Redpanda"
+    )
+    kafka_sasl_mechanism: str = Field(default="PLAIN")
+
+    # Topic per data product. One collector, many topics.
+    kafka_topic_positions: str = Field(default="eu-positions")
+    kafka_topic_flights: str = Field(default="eu-flights")
+    kafka_topic_metar: str = Field(default="eu-metar")
+    kafka_topic_taf: str = Field(default="eu-taf")
+    kafka_topic_forecast: str = Field(default="eu-forecast")
+    kafka_topic_fuel: str = Field(default="eu-fuel")
+    kafka_topic_reference: str = Field(default="eu-reference")
+    kafka_topic_meta: str = Field(default="eu-collect-meta")
+
+    # ── Kafka sink (Kafka → Bronze Parquet → Hugging Face) ───────────────
+    sink_consumer_group: str = Field(default="eu-air-traffic-sink")
+    sink_batch_size: int = Field(default=5_000, ge=1)
+    sink_poll_timeout_ms: int = Field(default=30_000, ge=1_000)
+    sink_max_seconds: float = Field(
+        default=0.0, ge=0.0, description="Stop after N seconds (0 = run until idle)"
+    )
+
+    # ── MotherDuck (Gold warehouse / dbt target) ─────────────────────────
+    motherduck_token: str | None = Field(default=None)
+    motherduck_database: str = Field(default="air_traffic")
+    # Where the pipeline *builds* the star schema + dbt models. Keep "local"
+    # for reproducible builds and publish to MotherDuck afterwards; set
+    # "motherduck" to build straight into the cloud database.
+    warehouse_target: Literal["local", "motherduck"] = "local"
+
+    # ── Turso (derived edge serving layer) ───────────────────────────────
+    # Gold marts + precomputed site payloads are published here after dbt and
+    # read by the site for fast, always-current analytics. One-way and derived:
+    # MotherDuck remains authoritative.
+    turso_database_url: str | None = Field(
+        default=None, description="libSQL/Turso URL, e.g. libsql://my-db-org.turso.io"
+    )
+    turso_auth_token: str | None = Field(default=None)
+    turso_serving_enabled: bool = Field(default=True)
+    turso_sync_tables: str = Field(
+        default="gold_airport_metrics,gold_airline_rankings,gold_delay_analysis,"
+        "gold_weather_impact,gold_seasonal_trends,gold_fuel_price_series,"
+        "gold_aircraft_class_mix,fact_positions,dim_airport,dim_aircraft,dim_route,"
+        "fact_emissions,fact_flights,weather",
+        description="Comma-separated warehouse tables copied to Turso",
+    )
+
+    # ── Live API (single endpoint served from the VPS collector) ─────────
+    live_api_host: str = Field(default="0.0.0.0")
+    live_api_port: int = Field(default=8090, ge=1, le=65535)
+    live_api_public_url: str | None = Field(
+        default=None,
+        description="Public base URL the dashboard should call, e.g. https://live.example.com",
+    )
+    live_api_token: str | None = Field(
+        default=None, description="Optional bearer token required for non-read endpoints"
+    )
+    live_snapshot_max_age_seconds: float = Field(default=120.0, ge=5.0)
+
+    # ── Collector service tuning ─────────────────────────────────────────
+    positions_interval_seconds: float = Field(default=15.0, ge=5.0)
+    # Live positions hit the dashboard every 15s, but only this often to the
+    # lake — persisting every tick is ~17M rows/day and mostly unused.
+    positions_publish_interval_seconds: float = Field(default=300.0, ge=30.0)
+    flights_interval_seconds: float = Field(default=300.0, ge=30.0)
+    metar_interval_seconds: float = Field(default=300.0, ge=60.0)
+    taf_interval_seconds: float = Field(default=900.0, ge=60.0)
+    forecast_interval_seconds: float = Field(default=3600.0, ge=300.0)
+    fuel_interval_seconds: float = Field(default=86_400.0, ge=3_600.0)
+    reference_interval_seconds: float = Field(default=86_400.0, ge=3_600.0)
+
+    # Concurrent upstream fetches (I/O-bound, so modest counts keep a 2-core
+    # VPS comfortable without hammering the free APIs).
+    adsb_max_workers: int = Field(default=4, ge=1, le=32)
+    flights_max_workers: int = Field(default=4, ge=1, le=32)
+    # Busiest hubs polled for movements (OpenSky anonymous credits are limited).
+    flights_airports: int = Field(default=12, ge=1, le=48)
+    kafka_flush_timeout_seconds: float = Field(default=15.0, ge=1.0)
+
+    # ── Kafka batch window (GitHub Actions pulls ~every 9 minutes) ────────
+    # The sink resumes from its committed offset, so each run drains exactly the
+    # records accumulated since the previous run. Kafka topic retention must be
+    # longer than the schedule gap or records are lost.
+    lake_window_seconds: int = Field(default=540, ge=60)  # 9 minutes
+    kafka_retention_hours: int = Field(default=24, ge=1)
 
     # ── Runtime behaviour ──────────────────────────────────────────────────
     environment: Literal["development", "test", "production"] = "development"
@@ -105,6 +225,7 @@ class Settings(BaseSettings):
     quarantine_dir: Path = PROJECT_ROOT / "warehouse" / "quarantine"
     checkpoint_dir: Path = PROJECT_ROOT / "warehouse" / "checkpoints"
     duckdb_path: Path = PROJECT_ROOT / "warehouse" / "air_traffic.duckdb"
+    realtime_db_path: Path = PROJECT_ROOT / "warehouse" / "realtime.duckdb"
     dbt_project_dir: Path = PROJECT_ROOT / "dbt"
 
     model_config = SettingsConfigDict(
@@ -112,8 +233,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
-        # pydantic-settings maps field names to env vars automatically
-        # (e.g. ``openweather_api_key`` → ``OPENWEATHER_API_KEY``).
+        populate_by_name=True,
     )
 
     @field_validator("environment", mode="before")
@@ -138,6 +258,61 @@ class Settings(BaseSettings):
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+        self.realtime_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def motherduck_enabled(self) -> bool:
+        """True when a MotherDuck token is configured (Gold serving layer)."""
+        return bool(self.motherduck_token)
+
+    @property
+    def motherduck_connection(self) -> str:
+        """DuckDB connection string for the MotherDuck database."""
+        return f"md:{self.motherduck_database}?motherduck_token={self.motherduck_token}"
+
+    @property
+    def warehouse_connection(self) -> str:
+        """Connection the pipeline builds into.
+
+        Local DuckDB by default (reproducible builds, single-writer, no cloud
+        round-trips); MotherDuck only when ``WAREHOUSE_TARGET=motherduck``.
+        """
+        if self.warehouse_target == "motherduck" and self.motherduck_enabled:
+            return self.motherduck_connection
+        return str(self.duckdb_path)
+
+    @property
+    def serving_connection(self) -> str:
+        """Connection read by the API / BI: MotherDuck when configured, else local."""
+        if self.motherduck_enabled:
+            return self.motherduck_connection
+        return str(self.duckdb_path)
+
+    @property
+    def kafka_enabled(self) -> bool:
+        if not self.aiven_kafka_host:
+            return False
+        if self.kafka_security_protocol == "PLAINTEXT":
+            return True
+        return bool(self.aiven_kafka_username and self.aiven_kafka_password)
+
+    @property
+    def kafka_topics(self) -> dict[str, str]:
+        """All data-product topics keyed by their logical source name."""
+        return {
+            "positions": self.kafka_topic_positions,
+            "flights": self.kafka_topic_flights,
+            "metar": self.kafka_topic_metar,
+            "taf": self.kafka_topic_taf,
+            "forecast": self.kafka_topic_forecast,
+            "fuel": self.kafka_topic_fuel,
+            "reference": self.kafka_topic_reference,
+            "meta": self.kafka_topic_meta,
+        }
+
+    @property
+    def live_api_enabled(self) -> bool:
+        return bool(self.live_api_public_url) or self.environment != "production"
 
     @property
     def credentials_available(self) -> dict[str, bool]:
@@ -151,6 +326,8 @@ class Settings(BaseSettings):
                 or (self.opensky_client_id and self.opensky_client_secret)
             ),
             "huggingface": bool(self.huggingface_token),
+            "motherduck": self.motherduck_enabled,
+            "kafka": self.kafka_enabled,
         }
 
 

@@ -188,19 +188,37 @@ class AirportCollector(Collector):
 
     # ── Collector interface ───────────────────────────────────────────────
     def fetch(self, start: datetime) -> list[dict[str, Any]]:
+        """Return the EU airport reference.
+
+        Airports are near-static, so this is local-first: the committed enriched
+        reference (``services/data/airports.json``) is used when present, then
+        the compact OpenFlights list. Live AirportDB enrichment is **not** done
+        here — it is a one-time build step (``scripts.build_reference_data``),
+        which is why a normal collect run makes no per-airport API calls.
+        """
+        from ingestion import reference
+
+        local = reference.airports()
+        if local:
+            logger.info("[airports] %s records from local reference", len(local))
+            return self._mock(local)
+
         airports = self.european_airports()
         if self.settings.mock_mode:
             return self._mock(airports)
 
         raw_cache = self._build_raw_cache()
-        enriched: list[dict[str, Any]] = []
-        for index, airport in enumerate(airports, start=1):
-            record = self.enriched_airport(airport, raw_cache)
-            if record:
-                enriched.append(record)
-            if index % 100 == 0:
-                logger.info("[airports] enriched %s/%s", index, len(airports))
-        return enriched
+        if raw_cache:
+            enriched = [
+                record
+                for airport in airports
+                if (record := self.enriched_airport(airport, raw_cache))
+            ]
+            logger.info("[airports] %s records from raw cache", len(enriched))
+            return enriched
+
+        logger.info("[airports] %s records from OpenFlights list (no enrichment)", len(airports))
+        return airports
 
 
 if __name__ == "__main__":

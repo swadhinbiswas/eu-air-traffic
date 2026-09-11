@@ -1,19 +1,22 @@
-{{ config(materialized='view') }}
+{{ config(materialized='view', tags=['marts']) }}
 
-with fact_flights as (
-    select * from {{ ref('stg_fact_flights') }}
+with flight_details as (
+    select * from {{ ref('int_flight_details') }}
 ),
 
-hourly as (
+trends as (
     select
-        cast(scheduled_departure as date) as flight_date,
-        date_part('hour', scheduled_departure) as hour_of_day,
+        flight_date,
+        departure_hour as hour_of_day,
         count(*) as flight_count,
-        round(avg(delay_minutes), 2) as avg_delay_minutes
-    from fact_flights
-    group by 1, 2
+        round(avg(delay_minutes), 2) as avg_delay_minutes,
+        round(avg(case when is_on_time then 1.0 else 0.0 end), 4) as on_time_rate,
+        sum(case when status = 'cancelled' then 1 else 0 end) as cancelled_flights
+    from flight_details
+    where flight_date is not null
+    group by flight_date, departure_hour
 )
 
 select *
-from hourly
-order by flight_date, hour_of_day
+from trends
+order by flight_date desc, hour_of_day

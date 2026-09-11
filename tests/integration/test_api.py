@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import duckdb
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from apps import main
 from apps.main import app
+from config.settings import Settings
 
 
 @pytest.mark.asyncio
@@ -54,3 +57,50 @@ async def test_dashboard_endpoint_serves_html():
     if response.status_code == 200:
         assert response.headers["content-type"].startswith("text/html")
         assert "Air Traffic" in response.text
+
+
+@pytest.mark.asyncio
+async def test_warehouse_query_returns_records(tmp_path, monkeypatch):
+    """A read-only query must return a JSON *list* of row objects."""
+    s = Settings(
+        environment="test",
+        motherduck_token=None,
+        warehouse_dir=tmp_path / "warehouse",
+        duckdb_path=tmp_path / "warehouse" / "air_traffic.duckdb",
+    )
+    s.ensure_directories()
+    with duckdb.connect(str(s.duckdb_path)) as con:
+        con.execute(
+            "CREATE TABLE gold_airport_metrics AS SELECT 'EDDF' airport_icao, 10 total_flights"
+        )
+    monkeypatch.setattr(main, "settings", s)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/warehouse/query",
+            json={"sql": "SELECT airport_icao, total_flights FROM gold_airport_metrics"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert body == [{"airport_icao": "EDDF", "total_flights": 10}]
+
+
+@pytest.mark.asyncio
+async def test_warehouse_query_rejects_bad_sql(tmp_path, monkeypatch):
+    s = Settings(
+        environment="test",
+        motherduck_token=None,
+        warehouse_dir=tmp_path / "warehouse",
+        duckdb_path=tmp_path / "warehouse" / "air_traffic.duckdb",
+    )
+    s.ensure_directories()
+    with duckdb.connect(str(s.duckdb_path)) as con:
+        con.execute("CREATE TABLE t (a INTEGER)")
+    monkeypatch.setattr(main, "settings", s)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/warehouse/query", json={"sql": "SELECT * FROM nope"})
+    assert response.status_code == 400

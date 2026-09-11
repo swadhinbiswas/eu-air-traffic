@@ -34,7 +34,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Type check (mypy)
-        run: uv run mypy config ingestion pipelines apps scripts --ignore-missing-imports
+        run: uv run mypy config ingestion pipelines apps scripts services --ignore-missing-imports
 
   test:
     name: Tests
@@ -105,3 +105,34 @@ jobs:
       - name: Generate dbt docs (catalog)
         working-directory: dbt
         run: uv run dbt docs generate --profiles-dir . || true
+
+  web:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Type-check & build dashboard
+        working-directory: web
+        env:
+          VITE_LIVE_URL: ${{ vars.VITE_LIVE_URL }}
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: npm run build
+
+      - name: Upload dashboard build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dashboard
+          path: web/dist
+          if-no-files-found: error

@@ -16,6 +16,8 @@ def test_settings(tmp_path: Path) -> Settings:
     s = Settings(
         environment="test",
         mock_mode=True,
+        motherduck_token=None,
+        warehouse_target="local",
         warehouse_dir=warehouse,
         raw_dir=warehouse / "raw",
         bronze_dir=warehouse / "bronze",

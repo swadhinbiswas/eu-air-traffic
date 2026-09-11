@@ -2,47 +2,229 @@ version: 2
 
 models:
   - name: airport_metrics
-    description: Per-airport KPI summary (flights, avg delay, on-time rate).
+    description: "Key performance metrics for each airport including flight volume, delays, and on-time performance"
     columns:
       - name: airport_icao
+        description: "ICAO airport code"
         tests:
+          - unique
           - not_null
       - name: total_flights
+        description: "Total number of flights"
         tests:
           - not_null
       - name: avg_delay_minutes
+        description: "Average delay in minutes"
+        tests:
+          - not_null
+      - name: max_delay_minutes
+        description: "Maximum delay in minutes"
+      - name: on_time_rate
+        description: "Percentage of flights arriving on time (within 15 minutes)"
         tests:
           - not_null
 
   - name: airline_rankings
-    description: Airline performance ranking by average delay.
+    description: "Airlines ranked by performance metrics"
     columns:
       - name: airline_icao
+        description: "ICAO airline code"
+        tests:
+          - unique
+          - not_null
+      - name: airline_name
+        description: "Airline name"
+      - name: total_flights
+        description: "Total number of flights"
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        description: "Average delay in minutes"
+      - name: on_time_rate
+        description: "On-time performance rate"
+      - name: rank
+        description: "Performance rank (1 = best)"
         tests:
           - not_null
           - unique
-      - name: rank
-        tests:
-          - not_null
 
   - name: delay_analysis
-    description: Delay breakdown by flight status.
+    description: "Analysis of flight delays by status category"
     columns:
       - name: status
+        description: "Flight status"
         tests:
           - not_null
+      - name: flight_count
+        description: "Number of flights"
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        description: "Average delay in minutes"
+      - name: min_delay_minutes
+        description: "Minimum delay"
+      - name: max_delay_minutes
+        description: "Maximum delay"
 
   - name: weather_impact
-    description: Weather condition impact on average delays.
+    description: "Impact of weather conditions on flight delays"
     columns:
       - name: weather_condition
+        description: "Weather condition category"
+        tests:
+          - unique
+          - not_null
+      - name: flight_count
+        description: "Number of flights in this condition"
         tests:
           - not_null
-          - unique
+      - name: avg_delay_minutes
+        description: "Average delay in this condition"
+      - name: avg_temperature_c
+        description: "Average temperature"
+      - name: avg_wind_speed_ms
+        description: "Average wind speed"
 
   - name: seasonal_trends
-    description: Daily/hourly traffic volumes and average delays.
+    description: "Flight and delay trends by date and hour"
     columns:
       - name: flight_date
+        description: "Flight date"
         tests:
           - not_null
+      - name: hour_of_day
+        description: "Hour of day (0-23)"
+        tests:
+          - not_null
+      - name: flight_count
+        description: "Number of flights"
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        description: "Average delay"
+
+  - name: fuel_price_series
+    description: "Daily fuel price series by region"
+    columns:
+      - name: date
+        description: "Date"
+        tests:
+          - not_null
+      - name: region
+        description: "Region code"
+        tests:
+          - not_null
+      - name: price_per_litre
+        description: "Price per litre in EUR"
+        tests:
+          - not_null
+      - name: currency
+        description: "Currency code"
+
+  - name: aircraft_utilization
+    description: "Aircraft type fleet profile: capacity, range, routes served and emission intensity"
+    columns:
+      - name: type_icao
+        description: "ICAO aircraft type code"
+        tests:
+          - unique
+          - not_null
+      - name: manufacturer
+        description: "Aircraft manufacturer"
+      - name: capacity
+        description: "Passenger capacity"
+      - name: range_km
+        description: "Maximum range in kilometers"
+      - name: routes_served
+        description: "Number of scheduled routes using this aircraft type"
+        tests:
+          - not_null
+      - name: co2_kg_per_hour
+        description: "CO2 emissions per hour in kg"
+
+  - name: route_performance
+    description: "Performance metrics for flight routes"
+    columns:
+      - name: origin
+        description: "Origin airport code"
+        tests:
+          - not_null
+      - name: destination
+        description: "Destination airport code"
+        tests:
+          - not_null
+      - name: total_flights
+        description: "Total flights on this route"
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        description: "Average delay"
+      - name: avg_distance_km
+        description: "Average distance"
+
+  - name: emissions_analysis
+    description: "Per-aircraft-type carbon emissions intensity (ICAO methodology factors)"
+    columns:
+      - name: aircraft_type
+        description: "Aircraft type code"
+        tests:
+          - unique
+          - not_null
+      - name: co2_kg_per_hour
+        description: "CO2 emissions per hour in kg"
+        tests:
+          - not_null
+      - name: fuel_burn_liters_per_hour
+        description: "Fuel burn rate in liters per hour"
+      - name: emission_factor_kg_per_kg_fuel
+        description: "Emission factor (kg CO2 per kg fuel)"
+
+  - name: notam_summary
+    description: "Summary of active NOTAMs by type and location"
+    columns:
+      - name: icao_location
+        description: "ICAO location code"
+        tests:
+          - not_null
+      - name: notam_type
+        description: "Type of NOTAM"
+        tests:
+          - not_null
+      - name: notam_count
+        description: "Number of NOTAMs"
+        tests:
+          - not_null
+      - name: latest_notam
+        description: "Most recent NOTAM timestamp"
+
+  - name: sector_analysis
+    description: "Airspace sector loading and performance"
+    columns:
+      - name: sector_code
+        description: "Sector code"
+        tests:
+          - not_null
+      - name: date
+        description: "Date"
+        tests:
+          - not_null
+      - name: flight_count
+        description: "Number of flights"
+        tests:
+          - not_null
+      - name: avg_delay_minutes
+        description: "Average delay"
+
+  - name: aircraft_class_mix
+    description: "Live airspace composition by operational class (cargo, military, passenger, private, helicopter, …) with carbon intensity"
+    columns:
+      - name: aircraft_class
+        description: "Operational class"
+        tests:
+          - not_null
+      - name: aircraft
+        description: "Aircraft currently airborne in this class"
+        tests:
+          - not_null
+      - name: total_co2_kg_per_hour
+        description: "Estimated CO2 emission rate for the class"
