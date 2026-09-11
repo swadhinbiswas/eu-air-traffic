@@ -141,7 +141,10 @@ function AircraftInfo({ plane, onClose }: { plane: Aircraft; onClose: () => void
         </Row>
         <Row label="OAT">
           {plane.oat !== null ? `${nf(plane.oat, 0)} °C` : "—"}
+          {plane.tat !== null ? <span className="text-zinc-500"> · TAT {nf(plane.tat, 0)} °C</span> : null}
         </Row>
+        <Row label="Route">{plane.route ?? "—"}</Row>
+        <Row label="QNH">{plane.navQnh !== null ? `${nf(plane.navQnh, 1)} hPa` : "—"}</Row>
         <Row label="Wind aloft">
           {plane.windSpeedKt !== null ? `${nf(plane.windSpeedKt, 0)} kt` : "—"}
           {plane.windDir !== null ? ` @ ${nf(plane.windDir, 0)}°` : ""}

@@ -16,8 +16,12 @@ export interface Aircraft {
   tas: number | null;
   mach: number | null;
   oat: number | null;
+  tat: number | null;
   windDir: number | null;
   windSpeedKt: number | null;
+  navQnh: number | null;
+  magHeading: number | null;
+  route: string | null;
   squawk: string | null;
   emergency: string | null;
   category: string | null;
@@ -74,8 +78,12 @@ export function fromLive(l: LiveAircraft): Aircraft {
     tas: l.tas,
     mach: l.mach,
     oat: l.oat,
+    tat: l.tat,
     windDir: l.windDir,
     windSpeedKt: l.windSpeed,
+    navQnh: l.navQnh,
+    magHeading: l.magHeading,
+    route: null,
     squawk: l.squawk,
     emergency: l.emergency,
     category: l.category,
@@ -110,8 +118,12 @@ export function fromSnapshot(p: Position): Aircraft {
     tas: null,
     mach: null,
     oat: null,
+    tat: null,
     windDir: null,
     windSpeedKt: null,
+    navQnh: null,
+    magHeading: null,
+    route: null,
     squawk: null,
     emergency: null,
     category: null,
@@ -150,8 +162,12 @@ export function fromApi(row: Record<string, unknown>): Aircraft {
     tas: null,
     mach: null,
     oat: null,
+    tat: null,
     windDir: null,
     windSpeedKt: null,
+    navQnh: null,
+    magHeading: null,
+    route: null,
     squawk: null,
     emergency: null,
     category: null,
@@ -188,8 +204,12 @@ export function fromCanonical(c: CanonicalAircraft): Aircraft {
     tas: num(c.tas),
     mach: num(c.mach),
     oat: num(c.oat),
+    tat: num(c.tat),
     windDir: num(c.wind_dir),
     windSpeedKt: num(c.wind_speed),
+    navQnh: num(c.nav_qnh),
+    magHeading: num(c.mag_heading),
+    route: c.route ?? null,
     squawk: c.squawk ?? null,
     emergency: c.emergency ?? null,
     category: c.category ?? null,
