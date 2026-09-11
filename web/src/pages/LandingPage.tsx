@@ -520,7 +520,7 @@ export function LandingPage() {
         <HudStat label="Weather stns" value={nf(weatherState.stations.length)} />
         <HudStat
           label="Avg delay"
-          value={`${nf(kpis?.avg_delay_minutes ?? 0, 0)} min`}
+          value={(kpis?.total_flights ?? 0) > 0 ? `${nf(kpis?.avg_delay_minutes ?? 0, 0)} min` : "—"}
           tone={delayTone(kpis?.avg_delay_minutes)}
         />
         <HudStat label="On-time" value={onTime !== null ? pct(onTime) : "—"} />

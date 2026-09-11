@@ -32,7 +32,7 @@ const EXAMPLES: { label: string; sql: string }[] = [
   },
   {
     label: "Live altitude bands",
-    sql: "SELECT\n  CASE\n    WHEN altitude < 10000 THEN '1 <10k ft'\n    WHEN altitude < 25000 THEN '2 10-25k ft'\n    WHEN altitude < 38000 THEN '3 25-38k ft'\n    ELSE '4 >38k ft'\n  END AS band,\n  COUNT(*) AS aircraft,\n  ROUND(AVG(velocity), 1) AS avg_speed\nFROM live_positions\nGROUP BY band\nORDER BY band;",
+    sql: "SELECT\n  CASE\n    WHEN altitude < 10000 THEN '1 <10k ft'\n    WHEN altitude < 25000 THEN '2 10-25k ft'\n    WHEN altitude < 38000 THEN '3 25-38k ft'\n    ELSE '4 >38k ft'\n  END AS band,\n  COUNT(*) AS aircraft,\n  ROUND(AVG(velocity), 1) AS avg_speed\nFROM fact_positions\nGROUP BY band\nORDER BY band;",
   },
   {
     label: "Airline punctuality",

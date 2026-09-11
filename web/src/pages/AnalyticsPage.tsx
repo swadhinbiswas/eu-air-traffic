@@ -12,10 +12,10 @@ import {
   TrendingUp,
   Wind,
 } from "lucide-react";
-import { Panel, SectionHeader, StatCard, Spinner, ErrorState } from "@/components/shared";
+import { Panel, SectionHeader, StatCard, Spinner, ErrorState, FreshnessLine, BatchEmptyState } from "@/components/shared";
 import { BarSeries, DonutSeries, LineSeries, ScatterSeries } from "@/components/charts";
 import { NetworkMap } from "@/components/NetworkMap";
-import { useAirports, useAnalytics, useKpis } from "@/hooks/useBundle";
+import { useAirports, useAnalytics, useBatchStatus, useKpis } from "@/hooks/useBundle";
 import { useFleet } from "@/hooks/useFleet";
 import { useLiveWeather } from "@/hooks/useLiveWeather";
 import { airlineFromCallsign } from "@/lib/airlines";
@@ -35,8 +35,11 @@ export function AnalyticsPage() {
   const { data: analytics, loading, error } = useAnalytics();
   const { data: airports } = useAirports();
   const { data: kpis } = useKpis();
+  const { data: batch } = useBatchStatus();
   const fleet = useFleet();
   const liveWeather = useLiveWeather();
+  const hasFlights = batch?.hasFlights ?? (kpis?.total_flights ?? 0) > 0;
+  const batchAsOf = batch?.asOf ?? null;
 
   const routes = useMemo(
     () =>
@@ -199,7 +202,10 @@ export function AnalyticsPage() {
         icon={<BarChart3 className="h-4 w-4" />}
         title="Business Analytics"
         subtitle="Gold-layer marts: traffic, punctuality, weather impact, network and emissions"
+        right={<FreshnessLine asOf={batchAsOf} />}
       />
+
+      {!hasFlights && !loading && <BatchEmptyState />}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Flights observed" value={nf(kpis?.total_flights ?? 0)} icon={<Plane className="h-3.5 w-3.5" />} />
@@ -299,6 +305,13 @@ export function AnalyticsPage() {
                     <td className="py-1.5 text-right text-emerald-400">{pct(r.on_time_rate)}</td>
                   </tr>
                 ))}
+              {!analytics.gold_airport_metrics.length && (
+                <tr>
+                  <td colSpan={5} className="py-6 text-center font-sans text-xs text-zinc-600">
+                    No airport metrics yet — flight history will populate this table.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

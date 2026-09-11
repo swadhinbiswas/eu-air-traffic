@@ -1,4 +1,6 @@
 import type { HTMLAttributes, ReactNode } from "react";
+import { DatabaseZap } from "lucide-react";
+import { relative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function Panel({
@@ -95,6 +97,38 @@ export function ErrorState({ message }: { message: string }) {
 export function EmptyState({ message }: { message: string }) {
   return (
     <div className="panel grid place-items-center p-10 text-sm text-zinc-500">{message}</div>
+  );
+}
+
+/** One-line "data as of X" freshness indicator for batch sections. */
+export function FreshnessLine({ asOf, className }: { asOf: string | null; className?: string }) {
+  return (
+    <span className={cn("mono text-[10px] text-zinc-500", className)}>
+      {asOf ? `Gold data as of ${relative(asOf)}` : "Gold data freshness unknown"}
+    </span>
+  );
+}
+
+/** Banner shown when flight history is empty: explains why, keeps live context. */
+export function BatchEmptyState({ compact = false }: { compact?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.06]",
+        compact ? "p-3" : "p-4"
+      )}
+    >
+      <DatabaseZap className="mt-0.5 h-4 w-4 flex-none text-amber-400" />
+      <div className="text-xs leading-relaxed">
+        <p className="font-semibold text-amber-200">No flight history in the warehouse yet</p>
+        <p className="mt-0.5 text-zinc-400">
+          Delay, punctuality and traffic charts need OpenSky flight movements. Add{" "}
+          <span className="mono text-zinc-300">OPENSKY_USERNAME</span> /{" "}
+          <span className="mono text-zinc-300">OPENSKY_PASSWORD</span> to the collector and the
+          next pipeline runs will backfill them. Live airspace below is unaffected.
+        </p>
+      </div>
+    </div>
   );
 }
 

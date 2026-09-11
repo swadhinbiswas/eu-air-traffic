@@ -10,6 +10,7 @@ import {
   type Story,
   type BundleManifest,
 } from "../lib/bundle";
+import type { BatchFreshness } from "../lib/motherduckData";
 
 /**
  * Load a dashboard dataset at runtime (warehouse API / collector), refreshing
@@ -72,6 +73,11 @@ export function useOps() {
 }
 export function useKpis() {
   return useRuntimeData<Kpis>("kpis.json", 30_000);
+}
+
+/** Warehouse freshness + whether flight history exists (drives empty states). */
+export function useBatchStatus() {
+  return useRuntimeData<BatchFreshness>("freshness.json", 60_000);
 }
 
 /** Live aircraft positions (runtime bundle; the map uses the live snapshot). */

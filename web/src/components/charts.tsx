@@ -23,6 +23,17 @@ const PALETTE = ["#34d399", "#22d3ee", "#60a5fa", "#a78bfa", "#fbbf24", "#fb7185
 const AXIS = { stroke: "#52525b", fontSize: 10, tickLine: false, axisLine: false };
 const GRID = { stroke: "rgba(255,255,255,0.06)", strokeDasharray: "3 3" };
 
+function NoData({ height, label = "No data in this window" }: { height: number; label?: string }) {
+  return (
+    <div
+      className="grid place-items-center rounded-md border border-dashed border-white/10 text-xs text-zinc-600"
+      style={{ height }}
+    >
+      {label}
+    </div>
+  );
+}
+
 const TOOLTIP_STYLE = {
   contentStyle: {
     background: "rgba(9,11,18,0.95)",
@@ -48,6 +59,7 @@ export function BarSeries({
   height?: number;
   color?: string;
 }) {
+  if (!data.length) return <NoData height={height} />;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
@@ -80,6 +92,7 @@ export function LineSeries({
   color?: string;
   area?: boolean;
 }) {
+  if (!data.length) return <NoData height={height} />;
   if (area) {
     return (
       <ResponsiveContainer width="100%" height={height}>
@@ -123,6 +136,7 @@ export function DonutSeries({
   valueKey?: string;
   height?: number;
 }) {
+  if (!data.length) return <NoData height={height} />;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
@@ -158,6 +172,7 @@ export function ScatterSeries({
   height?: number;
   color?: string;
 }) {
+  if (!data.length) return <NoData height={height} />;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ScatterChart margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>

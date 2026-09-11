@@ -89,7 +89,7 @@ export function AppShell() {
         <div className="flex items-center gap-3">
           <span className="hidden items-center gap-1.5 text-xs text-zinc-500 xl:flex">
             <GitBranch className="h-3.5 w-3.5" />
-            {manifest ? `${Object.values(manifest.counts).reduce((a, b) => a + b, 0).toLocaleString()} records` : "bundle"}
+            {manifest ? `${Object.values(manifest.counts).reduce((a, b) => a + b, 0).toLocaleString()} records` : "connecting…"}
           </span>
           <Clock />
           <a
