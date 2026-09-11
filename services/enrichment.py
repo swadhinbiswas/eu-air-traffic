@@ -12,6 +12,7 @@ from typing import Any
 
 from services.classification import classify
 from services.emissions import enrich_emissions
+from services.route_estimate import estimate_leg
 
 
 def enrich_position(row: dict[str, Any]) -> dict[str, Any]:
@@ -26,6 +27,22 @@ def enrich_position(row: dict[str, Any]) -> dict[str, Any]:
             icao24=row.get("icao24"),
         )
     )
+    # Geometric leg estimate only (origin *or* destination at most). The
+    # collector upgrades this with the learned callsign memory; a pre-existing
+    # observed/typical route is never downgraded.
+    if row.get("route_source") not in ("observed", "typical"):
+        leg = estimate_leg(row)
+        row["route_origin"] = leg["origin"]
+        row["route_destination"] = leg["destination"]
+        if leg["origin"] and leg["destination"]:
+            row["route"] = f"{leg['origin']} → {leg['destination']}"
+            row["route_source"] = "observed"
+        elif leg["origin"] or leg["destination"]:
+            row["route"] = f"{leg['origin']} → ?" if leg["origin"] else f"? → {leg['destination']}"
+            row["route_source"] = "estimated"
+        else:
+            row["route"] = None
+            row["route_source"] = "none"
     return row
 
 

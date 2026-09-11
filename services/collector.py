@@ -33,6 +33,7 @@ from services.bronze import BronzeWriter
 from services.enrichment import enrich_position
 from services.kafka_bus import KafkaBus
 from services.live_store import LiveStore
+from services.route_memory import RouteMemory
 from services.sources import Source, build_sources
 
 
@@ -47,6 +48,7 @@ class CollectorService:
         self.bus = KafkaBus(self.settings)
         self.bronze = BronzeWriter(self.settings)
         self.store = LiveStore()
+        self._route_memory = RouteMemory(self.settings.checkpoint_dir / "route_memory.json")
         self._running = False
         self._api_server: Any = None
         self._last_publish: dict[str, float] = {}
@@ -91,10 +93,27 @@ class CollectorService:
         logger.info("[collector] %s → %s rows (%s)", source.name, len(records), source.topic)
         return len(records)
 
+    def _apply_route_memory(self, records: list[dict[str, Any]]) -> None:
+        """Learn from estimated legs and fill full routes from memory."""
+        for row in records:
+            self._route_memory.observe(
+                row.get("callsign"), row.get("route_origin"), row.get("route_destination")
+            )
+            resolved = self._route_memory.resolve(
+                row.get("callsign"), row.get("route_origin"), row.get("route_destination")
+            )
+            if resolved["route"]:
+                row["route"] = resolved["route"]
+                row["route_origin"] = resolved["route_origin"]
+                row["route_destination"] = resolved["route_destination"]
+                row["route_source"] = resolved["route_source"]
+
     def poll_once(self, source: Source, publish: bool | None = None) -> int:
         records = source.fetch()
         if source.name == "positions" and records:
             records = [enrich_position(row) for row in records]
+            self._apply_route_memory(records)
+            self._route_memory.maybe_save()
         return self._handle(
             source, records, publish=self._publish_due(source) if publish is None else publish
         )
@@ -178,6 +197,7 @@ class CollectorService:
         self._running = False
         if self._api_server is not None:
             self._api_server.should_exit = True
+        self._route_memory.save()
         logger.info("[collector] stopping — stats=%s", self.stats)
         self.bus.close()
 
@@ -187,6 +207,7 @@ class CollectorService:
             for source in self.sources:
                 self.poll_once(source)
         finally:
+            self._route_memory.save()
             self.bus.close()
         return self.stats
 

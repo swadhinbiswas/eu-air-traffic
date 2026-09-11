@@ -385,6 +385,9 @@ export interface CanonicalAircraft {
   roll?: number | null;
   geom_rate?: number | null;
   route?: string | null;
+  route_source?: string | null;
+  route_origin?: string | null;
+  route_destination?: string | null;
   nic?: string | null;
   nac_p?: string | null;
   nac_v?: string | null;
