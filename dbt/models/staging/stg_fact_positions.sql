@@ -31,6 +31,7 @@ renamed as (
         emergency,
         co2_kg_per_hour,
         fuel_burn_kg_per_hour,
+        coalesce(co2_estimated, true) as co2_estimated,
         source as data_source,
         collected_at
     from source

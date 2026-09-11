@@ -106,10 +106,20 @@ class LiveStore:
         with self._lock:
             positions = list(self._sections.get(_POSITION_SECTION, {}).values())
         by_type: dict[str, dict[str, Any]] = {}
-        total = 0.0
+        by_source: dict[str, int] = {}
+        total = measured = estimated_total = 0.0
+        measured_n = estimated_n = 0
         for row in positions:
             rate = row.get("co2_kg_per_hour") or 0.0
             total += rate
+            src = str(row.get("source") or "unknown")
+            by_source[src] = by_source.get(src, 0) + 1
+            if row.get("co2_estimated"):
+                estimated_total += rate
+                estimated_n += 1
+            else:
+                measured += rate
+                measured_n += 1
             aircraft_type = str(row.get("aircraft_type") or "UNKNOWN")
             entry = by_type.setdefault(
                 aircraft_type,
@@ -121,6 +131,11 @@ class LiveStore:
         return {
             "total_co2_kg_per_hour": round(total, 1),
             "total_co2_tonnes_per_hour": round(total / 1000, 3),
+            "measured_co2_kg_per_hour": round(measured, 1),
+            "estimated_co2_kg_per_hour": round(estimated_total, 1),
+            "measured_aircraft": measured_n,
+            "estimated_aircraft": estimated_n,
+            "by_source": by_source,
             "by_type": ranked,
         }
 

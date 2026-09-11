@@ -410,6 +410,7 @@ export interface CanonicalAircraft {
   wake_category?: string | null;
   co2_kg_per_hour?: number | null;
   fuel_burn_kg_per_hour?: number | null;
+  co2_estimated?: boolean;
   source?: string | null;
   collected_at?: string | null;
   on_ground?: boolean;

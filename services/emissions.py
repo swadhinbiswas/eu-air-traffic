@@ -18,25 +18,49 @@ from ingestion.emissions.collector import (
 
 DEFAULT_TYPE = "A320"
 
+# Transponder pseudo-types for ground vehicles and fixed installations. They
+# emit ADS-B but burn no jet fuel, so they must never receive the fallback
+# airliner rate (previously a TWR/GND contact counted as a full A320).
+GROUND_TYPES = frozenset({"GND", "GRND", "TWR", "TOWER"})
+
+
+def emission_estimate(aircraft_type: str | None) -> tuple[float, float, bool]:
+    """Return ``(fuel_kg_per_hour, co2_kg_per_hour, estimated)`` for a type.
+
+    Ground vehicles resolve to a confident zero. Unknown types fall back to an
+    A320 narrowbody rate flagged as estimated, so the dashboard never presents
+    a guess as a measurement.
+    """
+    code = (aircraft_type or "").upper()
+    if code in GROUND_TYPES:
+        return 0.0, 0.0, False
+    rate_lph = FUEL_BURN_RATES.get(code)
+    estimated = rate_lph is None
+    if rate_lph is None:
+        rate_lph = FUEL_BURN_RATES[DEFAULT_TYPE]
+    fuel = round(rate_lph * FUEL_DENSITY_KG_PER_LITER, 1)
+    co2 = round(fuel * EMISSION_FACTOR_KG_PER_LITER, 1)
+    return fuel, co2, estimated
+
 
 def fuel_burn_kg_per_hour(aircraft_type: str | None) -> float:
     """Hourly fuel burn in kg for a type, falling back to a narrowbody."""
-    rate_lph = FUEL_BURN_RATES.get((aircraft_type or "").upper())
-    if rate_lph is None:
-        rate_lph = FUEL_BURN_RATES[DEFAULT_TYPE]
-    return round(rate_lph * FUEL_DENSITY_KG_PER_LITER, 1)
+    fuel, _, _ = emission_estimate(aircraft_type)
+    return fuel
 
 
 def co2_kg_per_hour(aircraft_type: str | None) -> float:
     """Instantaneous CO₂ emission rate in kg/hour for a type."""
-    return round(fuel_burn_kg_per_hour(aircraft_type) * EMISSION_FACTOR_KG_PER_LITER, 1)
+    _, co2, _ = emission_estimate(aircraft_type)
+    return co2
 
 
 def enrich_emissions(row: dict[str, Any]) -> dict[str, Any]:
     """Add estimated fuel/CO₂ rates to an aircraft position row (in place)."""
-    aircraft_type = row.get("aircraft_type")
-    row["fuel_burn_kg_per_hour"] = fuel_burn_kg_per_hour(aircraft_type)
-    row["co2_kg_per_hour"] = co2_kg_per_hour(aircraft_type)
+    fuel, co2, estimated = emission_estimate(row.get("aircraft_type"))
+    row["fuel_burn_kg_per_hour"] = fuel
+    row["co2_kg_per_hour"] = co2
+    row["co2_estimated"] = estimated
     return row
 
 
