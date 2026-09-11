@@ -269,7 +269,7 @@ All configuration lives in environment variables (never committed). See `.env.ex
 | `AVIATIONSTACK_API_KEY` | – | AviationStack fuel prices |
 | `OPENSKY_USERNAME` / `OPENSKY_PASSWORD` | – | OpenSky flights + positions fallback |
 | `AIVEN_KAFKA_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` | – | Aiven Kafka broker (the event bus) |
-| `KAFKA_TOPIC_*` | `eu-positions` … | One topic per data product (positions, flights, metar, taf, forecast, fuel, reference, meta) |
+| `KAFKA_TOPIC_*` | `eu-positions` … | 5 topics: positions, flights, weather (metar+taf+forecast), fuel, reference |
 | `LIVE_API_HOST` / `LIVE_API_PORT` | `0.0.0.0` / `8090` | Live snapshot API bind address |
 | `LIVE_API_PUBLIC_URL` | – | Public URL the dashboard is built against |
 | `HF_TOKEN` / `HF_REPO` | – | Hugging Face dataset (Bronze/Silver lake) |

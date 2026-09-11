@@ -97,6 +97,7 @@ class ForecastSource(Source):
             code = current.get("weather_code")
             rows.append(
                 {
+                    "_kind": "forecast",
                     "station_icao": icao,
                     "timestamp": f"{current.get('time', '')}:00+00:00",
                     "is_forecast": False,
@@ -123,6 +124,7 @@ class ForecastSource(Source):
             code = _at(hourly.get("weather_code"), index)
             rows.append(
                 {
+                    "_kind": "forecast",
                     "station_icao": icao,
                     "timestamp": f"{stamp}:00+00:00",
                     "is_forecast": True,

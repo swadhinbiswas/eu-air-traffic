@@ -78,7 +78,7 @@ export function DocsPage() {
           <div className="hud-label mb-2">End-to-end flow</div>
           <pre className="mono overflow-x-auto text-[11px] leading-relaxed text-zinc-400">
 {`VPS collector (24/7) → adsb.lol / OpenSky / aviationweather / Open-Meteo / AviationStack
-      → Kafka (eu-positions, eu-flights, eu-metar, eu-taf, eu-forecast, eu-fuel, eu-reference)
+      → Kafka (eu-positions, eu-flights, eu-weather, eu-fuel, eu-reference)
       → GET /live/snapshot → MapLibre globe / Analytics / Stories
       → GitHub Actions sink → Bronze/Silver Parquet → Hugging Face
       → dbt (staging → intermediate → marts → reports) → MotherDuck (Gold)

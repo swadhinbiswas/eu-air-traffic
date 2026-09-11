@@ -34,11 +34,11 @@ from services import hf_lake
 class KafkaSink:
     """Consumes Kafka topics and persists Bronze JSONL + Parquet (+ HF upload)."""
 
-    # Topic product name → Bronze/Silver dataset name used by the transforms.
-    _DATASET_ALIASES = {
+    # Shared topics are split back into datasets by the record ``_kind``.
+    _WEATHER_KINDS = {
         "metar": "weather",
-        "forecast": "weather_forecast",
         "taf": "weather_taf",
+        "forecast": "weather_forecast",
     }
     # Reference records carry a ``_kind`` discriminator and are split per dataset.
     _REFERENCE_KINDS = {
@@ -48,6 +48,16 @@ class KafkaSink:
         "emission": "emissions",
         "holiday": "holidays",
     }
+    # Topics from the retired 8-topic layout. Subscribed only while they still
+    # exist so the backlog drains exactly once; afterwards the broker stops
+    # returning them and the sink runs on the 5 live topics with no code change.
+    LEGACY_TOPICS = ("eu-metar", "eu-taf", "eu-forecast", "eu-collect-meta")
+    # Legacy records predate the ``_kind`` field; route them by record shape.
+    _LEGACY_WEATHER_TOPICS = {
+        "eu-metar": "weather",
+        "eu-taf": "weather_taf",
+        "eu-forecast": "weather_forecast",
+    }
 
     def __init__(self, app_settings: Settings | None = None, upload: bool = True) -> None:
         self.settings = app_settings or settings
@@ -56,14 +66,32 @@ class KafkaSink:
         self._buffers: dict[str, list[dict[str, Any]]] = {}
         self.counts: dict[str, int] = {}
         self.files: list[Path] = []
-        self._topic_to_source = {topic: name for name, topic in self.settings.kafka_topics.items()}
 
-    def _datasets_for(self, topic_source: str, value: dict[str, Any]) -> list[str]:
+    def _datasets_for(self, topic: str, value: dict[str, Any]) -> list[str]:
         """Resolve a Kafka message to one or more Bronze dataset names."""
-        if topic_source == "reference":
+        topics = self.settings.kafka_topics
+        if topic == topics["weather"]:
+            kind = str(value.get("_kind") or self._infer_weather_kind(value))
+            return [self._WEATHER_KINDS.get(kind, "weather")]
+        if topic == topics["reference"]:
             kind = str(value.get("_kind") or "")
             return [self._REFERENCE_KINDS.get(kind, "reference")]
-        return [self._DATASET_ALIASES.get(topic_source, topic_source)]
+        if topic in self._LEGACY_WEATHER_TOPICS:
+            return [self._LEGACY_WEATHER_TOPICS[topic]]
+        if topic == "eu-collect-meta":
+            return []  # retired run-metadata topic; nothing consumes it
+        # positions / flights / fuel land under their own dataset name.
+        reverse = {name: role for role, name in topics.items()}
+        return [reverse.get(topic, topic)]
+
+    @staticmethod
+    def _infer_weather_kind(value: dict[str, Any]) -> str:
+        """Route kind-less records (pre-``_kind`` producers) by record shape."""
+        if "raw_taf" in value:
+            return "taf"
+        if "is_forecast" in value:
+            return "forecast"
+        return "metar"
 
     # ── connection ─────────────────────────────────────────────────────────
     def _security(self) -> dict[str, Any]:
@@ -87,7 +115,6 @@ class KafkaSink:
         topics = list(dict.fromkeys(s.kafka_topics.values()))
         try:
             self._consumer = KafkaConsumer(
-                *topics,
                 bootstrap_servers=f"{s.aiven_kafka_host}:{s.aiven_kafka_port}",
                 group_id=s.sink_consumer_group,
                 auto_offset_reset="earliest",
@@ -97,7 +124,15 @@ class KafkaSink:
                 consumer_timeout_ms=s.sink_poll_timeout_ms,
                 **self._security(),
             )
-            logger.info("[sink] subscribed to %s topics: %s", len(topics), topics)
+            try:
+                existing = set(self._consumer.topics())
+            except Exception:  # noqa: BLE001 - fall back to the live topics only
+                existing = set()
+            legacy = [t for t in self.LEGACY_TOPICS if t in existing]
+            if legacy:
+                logger.info("[sink] also draining retired topics: %s", legacy)
+            self._consumer.subscribe(topics + legacy)
+            logger.info("[sink] subscribed to %s topics: %s", len(topics + legacy), topics + legacy)
             return True
         except Exception as exc:  # noqa: BLE001 - let the caller retry
             logger.error("[sink] connection failed: %s", exc)
@@ -169,11 +204,10 @@ class KafkaSink:
 
         try:
             for message in self._consumer:
-                topic_source = self._topic_to_source.get(message.topic, message.topic)
                 value = message.value
                 if not isinstance(value, dict):
                     continue
-                for source in self._datasets_for(topic_source, value):
+                for source in self._datasets_for(message.topic, value):
                     buffer = self._buffers.setdefault(source, [])
                     buffer.append(value)
                     if len(buffer) >= max_batch:

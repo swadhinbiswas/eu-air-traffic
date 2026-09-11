@@ -116,12 +116,31 @@ def test_live_api_endpoints() -> None:
 
 def test_sink_dataset_mapping() -> None:
     sink = KafkaSink()
-    assert sink._datasets_for("metar", {}) == ["weather"]
-    assert sink._datasets_for("forecast", {}) == ["weather_forecast"]
-    assert sink._datasets_for("taf", {}) == ["weather_taf"]
-    assert sink._datasets_for("positions", {}) == ["positions"]
-    assert sink._datasets_for("reference", {"_kind": "route"}) == ["routes"]
-    assert sink._datasets_for("reference", {"_kind": "emission"}) == ["emissions"]
+    topics = sink.settings.kafka_topics
+    assert sink._datasets_for(topics["weather"], {"_kind": "metar"}) == ["weather"]
+    assert sink._datasets_for(topics["weather"], {"_kind": "forecast"}) == ["weather_forecast"]
+    assert sink._datasets_for(topics["weather"], {"_kind": "taf"}) == ["weather_taf"]
+    assert sink._datasets_for(topics["weather"], {}) == ["weather"]
+    assert sink._datasets_for(topics["positions"], {}) == ["positions"]
+    assert sink._datasets_for(topics["flights"], {}) == ["flights"]
+    assert sink._datasets_for(topics["fuel"], {}) == ["fuel"]
+    assert sink._datasets_for(topics["reference"], {"_kind": "route"}) == ["routes"]
+    assert sink._datasets_for(topics["reference"], {"_kind": "emission"}) == ["emissions"]
+
+
+def test_sink_legacy_topics_drain_to_same_datasets() -> None:
+    """Pre-``_kind`` records from the retired topics route by record shape."""
+    sink = KafkaSink()
+    assert sink._datasets_for("eu-metar", {"station_icao": "EDDF"}) == ["weather"]
+    assert sink._datasets_for("eu-taf", {"raw_taf": "TAF EDDF"}) == ["weather_taf"]
+    assert sink._datasets_for("eu-forecast", {"is_forecast": True}) == ["weather_forecast"]
+    assert sink._datasets_for("eu-collect-meta", {}) == []
+
+
+def test_five_topics_only() -> None:
+    from config.settings import settings
+
+    assert sorted(settings.kafka_topics) == ["flights", "fuel", "positions", "reference", "weather"]
 
 
 def test_sink_writes_jsonl_and_parquet(tmp_path, monkeypatch) -> None:

@@ -3,11 +3,17 @@
 Production tooling for the event bus. Aiven disables automatic topic creation on
 some plans, so run ``create-topics`` once after provisioning.
 
+The platform uses exactly 5 topics (the free-plan limit): eu-positions,
+eu-flights, eu-weather (metar+taf+forecast, split by ``_kind``), eu-fuel and
+eu-reference. ``delete-legacy-topics`` removes the topics from the old 8-topic
+layout (eu-metar, eu-taf, eu-forecast, eu-collect-meta) to free the slots.
+
 Usage::
 
-    python -m scripts.kafka_admin check          # connect + report broker/topics
-    python -m scripts.kafka_admin create-topics  # create missing topics
-    python -m scripts.kafka_admin roundtrip      # produce + consume a test record
+    python -m scripts.kafka_admin check                  # connect + report broker/topics
+    python -m scripts.kafka_admin create-topics          # create missing topics
+    python -m scripts.kafka_admin delete-legacy-topics   # drop the old 8-topic layout
+    python -m scripts.kafka_admin roundtrip              # produce + consume a test record
 """
 
 from __future__ import annotations
@@ -144,9 +150,36 @@ def roundtrip() -> int:
     return 1
 
 
+# Topics from the retired 8-topic layout. They must be deleted for the 5-topic
+# free-plan limit to hold.
+LEGACY_TOPICS = ["eu-metar", "eu-taf", "eu-forecast", "eu-collect-meta"]
+
+
+def delete_legacy_topics() -> int:
+    if not settings.kafka_enabled:
+        print("Kafka is not configured")
+        return 1
+    from kafka.admin import KafkaAdminClient
+
+    admin = KafkaAdminClient(client_id="eu-air-traffic-admin", **_client_setting())
+    try:
+        existing = set(admin.list_topics())
+        to_delete = [t for t in LEGACY_TOPICS if t in existing]
+        if not to_delete:
+            print("no legacy topics present")
+            return 0
+        admin.delete_topics(to_delete)
+        print(f"deleted: {', '.join(to_delete)}")
+    finally:
+        admin.close()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Kafka admin/check tooling")
-    parser.add_argument("command", choices=["check", "create-topics", "roundtrip"])
+    parser.add_argument(
+        "command", choices=["check", "create-topics", "delete-legacy-topics", "roundtrip"]
+    )
     parser.add_argument("--partitions", type=int, default=DEFAULT_PARTITIONS)
     args = parser.parse_args()
 
@@ -154,6 +187,8 @@ def main() -> int:
         return check()
     if args.command == "create-topics":
         return create_topics(partitions=args.partitions)
+    if args.command == "delete-legacy-topics":
+        return delete_legacy_topics()
     return roundtrip()
 
 
