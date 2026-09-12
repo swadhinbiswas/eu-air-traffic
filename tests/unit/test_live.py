@@ -265,6 +265,7 @@ def test_flights_source_queries_both_directions(monkeypatch) -> None:
     monkeypatch.setattr(src.settings, "flights_airports", 1)
 
     rows = src.fetch()
+    assert any(url.endswith("/flights/all") for url in session.calls)
     assert any(url.endswith("/flights/departure") for url in session.calls)
     assert any(url.endswith("/flights/arrival") for url in session.calls)
     by_id = {row["flight_id"]: row for row in rows}
@@ -301,8 +302,9 @@ def test_flights_source_falls_back_to_queried_airport(monkeypatch) -> None:
     monkeypatch.setattr(src.settings, "flights_airports", 1)
 
     rows = src.fetch()
-    # The airport we queried is authoritative for its own direction.
-    assert len(rows) == 2
+    # /flights/all row has no ends, the departure and arrival rows each supply
+    # the airport that was queried.
+    assert len(rows) == 3
     departure = next(r for r in rows if r["departure_icao"] == "EDDF")
     arrival = next(r for r in rows if r["arrival_icao"] == "EDDF")
     assert departure["arrival_icao"] is None
@@ -377,16 +379,28 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    """adsb.lol fails on every circle; OpenSky returns one row."""
+    """adsb.lol fails on every circle; OpenSky returns one row.
+
+    airplanes.live is blocked (403), which is what this machine sees — the VPS
+    may fare better, but the fallback chain must survive both failing.
+    """
 
     def __init__(self, circle_status=500):
         self.circle_status = circle_status
         self.get_calls = 0
+        self.adsb_calls = 0
+        self.airplanes_calls = 0
+        self.opensky_calls = 0
 
     def get(self, url, headers=None, timeout=None, params=None, auth=None):
         self.get_calls += 1
         if "adsb.lol" in url:
+            self.adsb_calls += 1
             return _FakeResponse(status=self.circle_status)
+        if "airplanes.live" in url:
+            self.airplanes_calls += 1
+            return _FakeResponse(status=403)
+        self.opensky_calls += 1
         return _FakeResponse(
             payload={
                 "states": [
@@ -431,12 +445,14 @@ def test_positions_429_parks_circle_in_cooldown() -> None:
     session = _FakeSession(circle_status=429)
     src = PositionsSource(session=session)
     assert len(src.fetch()) == 1  # opensky fill on first degraded tick
-    first_calls = session.get_calls
-    assert first_calls > 10  # 10 circles + opensky
+    assert session.adsb_calls == 10
     assert len(src._cooldown_until) == 10
-    session.get_calls = 0
-    assert len(src.fetch()) == 1  # circles skipped, opensky only
-    assert session.get_calls == 1
+    # Second tick: adsb.lol circles are skipped, the airplanes.live fallback is
+    # still tried (and blocked here), and OpenSky fills the gaps.
+    session.adsb_calls = 0
+    assert len(src.fetch()) == 1
+    assert session.adsb_calls == 0
+    assert session.opensky_calls >= 1
 
 
 def test_taf_endpoint_returns_camel_case_contract() -> None:

@@ -123,6 +123,10 @@ class Settings(BaseSettings):
     # lake — persisting every tick is ~17M rows/day and mostly unused.
     positions_publish_interval_seconds: float = Field(default=300.0, ge=30.0)
     flights_interval_seconds: float = Field(default=1800.0, ge=300.0)
+    # /flights/all window; OpenSky rejects anything above two hours.
+    flights_lookback_minutes: int = Field(default=90, ge=30, le=120)
+    # Arrivals are published in a nightly batch, so backfill them rarely.
+    flights_arrival_interval_seconds: float = Field(default=21600.0, ge=3600.0)
     metar_interval_seconds: float = Field(default=300.0, ge=60.0)
     taf_interval_seconds: float = Field(default=900.0, ge=60.0)
     forecast_interval_seconds: float = Field(default=3600.0, ge=300.0)

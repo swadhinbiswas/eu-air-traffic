@@ -1,4 +1,4 @@
-"""Live aircraft positions — adsb.lol with an OpenSky fallback.
+"""Live aircraft positions — adsb.lol with airplanes.live and OpenSky fallbacks.
 
 Community ADS-B APIs block Cloudflare egress but are reachable from the VPS, so
 this is the primary live feed. The canonical row keeps full telemetry (speed,
@@ -18,6 +18,7 @@ from config.logging import logger
 from services.sources.base import Source
 
 ADSB_LOL = "https://api.adsb.lol/v2"
+AIRPLANES_LIVE = "https://api.airplanes.live/v2"
 OPENSKY = "https://opensky-network.org/api"
 
 HEADERS = {
@@ -50,7 +51,7 @@ def _num(value: Any) -> float | None:
     return result if result == result else None  # reject NaN
 
 
-def normalise_adsb(ac: dict[str, Any]) -> dict[str, Any] | None:
+def normalise_adsb(ac: dict[str, Any], source: str = "adsb.lol") -> dict[str, Any] | None:
     """Map a tar1090-style aircraft record to the canonical position row."""
     hex_code = str(ac.get("hex") or "").upper()
     lat, lon = _num(ac.get("lat")), _num(ac.get("lon"))
@@ -93,7 +94,7 @@ def normalise_adsb(ac: dict[str, Any]) -> dict[str, Any] | None:
         "sil": ac.get("sil"),
         "rc": _num(ac.get("rc")),
         "on_ground": bool(ac.get("ground")),
-        "source": "adsb.lol",
+        "source": source,
         "collected_at": datetime.now(UTC).isoformat(),
     }
 
@@ -156,37 +157,48 @@ class PositionsSource(Source):
         by_hex: dict[str, dict[str, Any]] = {}
 
         def fetch_center(center: tuple[float, float, int]) -> tuple[list[dict[str, Any]], bool]:
+            """adsb.lol first, then airplanes.live; a valid response ends it."""
             lat, lon, dist = center
-            if time.monotonic() < self._cooldown_until.get(center, 0.0):
-                return [], True
-            try:
-                res = self._session.get(
-                    f"{ADSB_LOL}/lat/{lat:.2f}/lon/{lon:.2f}/dist/{dist}",
-                    headers=HEADERS,
-                    timeout=self.settings.request_timeout_seconds,
-                )
-            except (requests.RequestException, ValueError) as exc:
-                logger.warning("[positions] adsb.lol %s,%s unreachable: %s", lat, lon, exc)
-                return [], True
-            if res.status_code == 429:
-                wait = self._retry_after_seconds(res)
-                self._cooldown_until[center] = time.monotonic() + wait
-                logger.warning(
-                    "[positions] adsb.lol %s,%s rate-limited (429) — cooling down %ds",
-                    lat,
-                    lon,
-                    int(wait),
-                )
-                return [], True
-            if res.status_code != 200:
-                logger.warning("[positions] adsb.lol %s,%s HTTP %s", lat, lon, res.status_code)
-                return [], True
-            try:
-                rows = [normalise_adsb(ac) for ac in res.json().get("ac", [])]
-            except ValueError as exc:
-                logger.warning("[positions] adsb.lol %s,%s bad payload: %s", lat, lon, exc)
-                return [], True
-            return [row for row in rows if row], False
+            cooling = time.monotonic() < self._cooldown_until.get(center, 0.0)
+            providers = [
+                ("adsb.lol", f"{ADSB_LOL}/lat/{lat:.2f}/lon/{lon:.2f}/dist/{dist}"),
+                ("airplanes.live", f"{AIRPLANES_LIVE}/point/{lat}/{lon}/{dist}"),
+            ]
+            for source, url in providers:
+                if source == "adsb.lol" and cooling:
+                    continue
+                try:
+                    res = self._session.get(
+                        url,
+                        headers=HEADERS,
+                        timeout=self.settings.request_timeout_seconds,
+                    )
+                except (requests.RequestException, ValueError) as exc:
+                    logger.warning("[positions] %s %s,%s unreachable: %s", source, lat, lon, exc)
+                    continue
+                if res.status_code == 429:
+                    wait = self._retry_after_seconds(res)
+                    self._cooldown_until[center] = time.monotonic() + wait
+                    logger.warning(
+                        "[positions] %s %s,%s rate-limited (429) — cooling down %ds",
+                        source,
+                        lat,
+                        lon,
+                        int(wait),
+                    )
+                    continue
+                if res.status_code != 200:
+                    logger.warning(
+                        "[positions] %s %s,%s HTTP %s", source, lat, lon, res.status_code
+                    )
+                    continue
+                try:
+                    rows = [normalise_adsb(ac, source) for ac in res.json().get("ac", [])]
+                except ValueError as exc:
+                    logger.warning("[positions] %s %s,%s bad payload: %s", source, lat, lon, exc)
+                    continue
+                return [row for row in rows if row], False
+            return [], True
 
         workers = min(self.settings.adsb_max_workers, len(EU_CENTERS))
         failed = 0
