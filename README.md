@@ -315,9 +315,52 @@ sudo systemctl enable --now eu-collector
 journalctl -u eu-collector -f
 ```
 
-Expose port 8090 with Cloudflare Tunnel or Caddy, set `LIVE_API_PUBLIC_URL`, and rebuild the dashboard with `VITE_LIVE_URL`.
-
 The collector is the **only** process that runs on the VPS. It is I/O-bound (idle CPU), so a 2-core box is plenty; it uses 4 concurrent fetches per source and shuts down cleanly on `SIGTERM` (systemd `TimeoutStopSec=30`). Kafka → Bronze → Silver → Gold all run ephemerally in GitHub Actions.
+
+### HTTPS for the live API (Caddy)
+
+The dashboard is served over HTTPS, and browsers block an HTTPS page from calling
+an `http://` API (mixed content). Put Caddy in front of the collector — it
+terminates TLS with an automatic Let's Encrypt certificate:
+
+```bash
+# 1. DNS: point a hostname at the VPS (A record), e.g. vps.example.com -> <vps-ip>
+
+# 2. Install Caddy
+sudo apt install caddy      # Debian/Ubuntu
+sudo pacman -S caddy        # Arch
+
+# 3. Install the site config and start it
+sudo cp /opt/eu-air-traffic/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl enable --now caddy
+systemctl reload caddy
+
+# 4. Firewall: allow the ACME challenge + TLS
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+
+# 5. Verify (certificate is issued on first request)
+curl -s https://vps.example.com/health
+```
+
+Then tighten the collector so it is only reachable through Caddy — set
+`LIVE_API_HOST=127.0.0.1` in `/opt/eu-air-traffic/.env`, restart it, and close
+the raw port:
+
+```bash
+sudo systemctl restart eu-collector
+sudo ufw delete allow 8090/tcp   # if it was opened manually
+```
+
+Finally point the site at it and rebuild:
+
+```bash
+VITE_LIVE_URL=https://vps.example.com npm run build
+```
+
+`VITE_*` values are baked in at **build time** — changing `.env` after a build
+has no effect until you rebuild. In GitHub Actions, set the repository variable
+`VITE_LIVE_URL` (Settings → Secrets and variables → Actions → Variables) and
+re-run the `Frontend` workflow.
 
 ### Docker Compose
 
