@@ -32,6 +32,18 @@ def create_app(store: LiveStore, app_settings: Settings | None = None) -> FastAP
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _no_store(request: Any, call_next: Any) -> Any:
+        """Never let a browser or proxy cache live data.
+
+        Without an explicit directive browsers may reuse a response, which shows
+        up as the dashboard freezing on the same snapshot for minutes.
+        """
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
     def _snapshot() -> dict[str, Any]:
         return store.snapshot(cfg.live_snapshot_max_age_seconds)
 
