@@ -1,14 +1,14 @@
 /**
- * MotherDuck-backed dashboard data — the runtime replacement for the static
- * bundle. Every function returns the exact JSON shape the pages expect, so
- * `loadBundle()` swaps sources without touching a single page.
+ * Turso-backed dashboard data — the runtime replacement for the static bundle.
+ * Every function returns the JSON shape the pages already expect.
  *
  * Sources:
- *  - analytics / kpis / airports / catalog / stories / manifest → MotherDuck Gold
- *  - ops.pipeline / ops.quality → MotherDuck `site_ops`
- *  - ops.stream_health, positions, metars, weather → VPS live snapshot
+ *  - analytics / kpis / airports / catalog / stories / ops / manifest → Turso
+ *  - live positions / weather → VPS /live/snapshot
+ *
+ * SQL is SQLite (no schema prefixes, sqlite_master instead of information_schema).
  */
-import { runMotherDuck } from "./motherduck";
+import { tursoBatch, tursoQuery } from "./turso";
 import { tryLiveApi, type LiveSnapshot } from "./bundle";
 import type {
   Analytics,
@@ -25,41 +25,54 @@ import type {
 } from "./bundle";
 
 type Row = Record<string, unknown>;
-
-/** Shape of the collector's `GET /live/status`. */
-interface LiveStatusResponse {
-  status: string;
-  sections: Record<string, number>;
-  reference: Record<string, number>;
-  updatedAt: Record<string, string>;
-  ageSeconds: Record<string, number | null>;
-  maxAgeSeconds: number;
-  totals: Record<string, number>;
-}
-const str = (v: unknown, fallback = ""): string => (v === null || v === undefined ? fallback : String(v));
+const str = (v: unknown, fallback = ""): string =>
+  v === null || v === undefined ? fallback : String(v);
 const num = (v: unknown, fallback = 0): number => {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
 
-async function q<T = Row>(sql: string, limit = 5000): Promise<T[]> {
-  const { rows } = await runMotherDuck(`${sql} LIMIT ${limit}`);
-  return rows as T[];
+export interface BatchFreshness {
+  asOf: string | null;
+  totalFlights: number;
+  hasFlights: boolean;
+}
+
+async function rows<T = Row>(sql: string): Promise<T[]> {
+  const { rows: out } = await tursoQuery(sql);
+  return out as T[];
 }
 
 async function scalar<T>(sql: string, fallback: T): Promise<T> {
   try {
-    const { rows } = await runMotherDuck(sql);
-    const first = rows[0];
-    if (!first) return fallback;
-    const v = Object.values(first)[0];
+    const { rows: out } = await tursoQuery(sql);
+    if (!out.length) return fallback;
+    const v = Object.values(out[0])[0];
     return (v ?? fallback) as T;
   } catch {
     return fallback;
   }
 }
 
-/** All 7 Gold marts + the Explorer datasets + catalog tables. */
+/** When the Gold layer was last refreshed + whether flight history exists. */
+export async function fetchFreshness(): Promise<BatchFreshness> {
+  const [asOfFlights, asOfPositions, asOfWeather, totalFlights] = await Promise.all([
+    scalar<string | null>("SELECT MAX(collected_at) FROM fact_flights", null),
+    scalar<string | null>("SELECT MAX(collected_at) FROM fact_positions", null),
+    scalar<string | null>("SELECT MAX(collected_at) FROM weather", null),
+    scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
+  ]);
+  const candidates = [asOfFlights, asOfPositions, asOfWeather].filter(
+    (v): v is string => typeof v === "string" && v.length > 0
+  );
+  candidates.sort();
+  return {
+    asOf: candidates.length ? candidates[candidates.length - 1] : null,
+    totalFlights,
+    hasFlights: totalFlights > 0,
+  };
+}
+
 export async function fetchAnalytics(): Promise<Analytics> {
   const [
     gold_airport_metrics,
@@ -75,24 +88,23 @@ export async function fetchAnalytics(): Promise<Analytics> {
     status_mix,
     catalog,
   ] = await Promise.all([
-    q("SELECT * FROM main.gold_airport_metrics"),
-    q("SELECT * FROM main.gold_airline_rankings"),
-    q("SELECT * FROM main.gold_delay_analysis"),
-    q("SELECT * FROM main.gold_weather_impact"),
-    q("SELECT * FROM main.gold_seasonal_trends"),
-    q("SELECT * FROM main.gold_fuel_price_series"),
-    q(
+    rows("SELECT * FROM gold_airport_metrics"),
+    rows("SELECT * FROM gold_airline_rankings"),
+    rows("SELECT * FROM gold_delay_analysis"),
+    rows("SELECT * FROM gold_weather_impact"),
+    rows("SELECT * FROM gold_seasonal_trends"),
+    rows("SELECT * FROM gold_fuel_price_series"),
+    rows(
       "SELECT r.origin, r.destination, r.airline, r.stops, r.equipment, r.distance_km, " +
         "COUNT(f.flight_id) AS total_flights, AVG(f.delay_minutes) AS avg_delay_minutes " +
-        "FROM main.dim_route r LEFT JOIN main.fact_flights f " +
+        "FROM dim_route r LEFT JOIN fact_flights f " +
         "ON f.departure_icao = r.origin AND f.arrival_icao = r.destination " +
-        "GROUP BY 1,2,3,4,5,6 ORDER BY total_flights DESC, distance_km DESC",
-      2000
+        "GROUP BY 1,2,3,4,5,6 ORDER BY total_flights DESC, distance_km DESC LIMIT 2000"
     ),
-    q("SELECT type_icao, manufacturer, family, engine, capacity, range_km FROM main.dim_aircraft ORDER BY capacity DESC"),
-    q("SELECT aircraft_type, fuel_burn_liters_per_hour, co2_kg_per_hour FROM main.fact_emissions ORDER BY co2_kg_per_hour DESC"),
-    q("SELECT icao_location, COUNT(*) AS notam_count FROM main.fact_notams GROUP BY icao_location ORDER BY notam_count DESC"),
-    q("SELECT status, COUNT(*) AS flight_count, ROUND(AVG(delay_minutes), 1) AS avg_delay FROM main.fact_flights GROUP BY status ORDER BY flight_count DESC"),
+    rows("SELECT type_icao, manufacturer, family, engine, capacity, range_km FROM dim_aircraft ORDER BY capacity DESC"),
+    rows("SELECT aircraft_type, fuel_burn_liters_per_hour, co2_kg_per_hour FROM fact_emissions ORDER BY co2_kg_per_hour DESC"),
+    rows("SELECT icao_location, COUNT(*) AS notam_count FROM fact_notams GROUP BY icao_location ORDER BY notam_count DESC"),
+    rows("SELECT status, COUNT(*) AS flight_count, ROUND(AVG(delay_minutes), 1) AS avg_delay FROM fact_flights GROUP BY status ORDER BY flight_count DESC"),
     fetchCatalog(),
   ]);
   return {
@@ -113,11 +125,11 @@ export async function fetchAnalytics(): Promise<Analytics> {
 
 export async function fetchKpis(): Promise<Kpis> {
   const [total_flights, avg_delay_minutes, cancelled, airlines, airports] = await Promise.all([
-    scalar<number>("SELECT COUNT(*) FROM main.fact_flights", 0),
-    scalar<number>("SELECT AVG(delay_minutes) FROM main.fact_flights WHERE status != 'cancelled'", 0),
-    scalar<number>("SELECT COUNT(*) FROM main.fact_flights WHERE status = 'cancelled'", 0),
-    scalar<number>("SELECT COUNT(*) FROM main.dim_airline", 0),
-    scalar<number>("SELECT COUNT(*) FROM main.dim_airport", 0),
+    scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
+    scalar<number>("SELECT AVG(delay_minutes) FROM fact_flights WHERE status != 'cancelled'", 0),
+    scalar<number>("SELECT COUNT(*) FROM fact_flights WHERE status = 'cancelled'", 0),
+    scalar<number>("SELECT COUNT(*) FROM dim_airline", 0),
+    scalar<number>("SELECT COUNT(*) FROM dim_airport", 0),
   ]);
   return {
     total_flights,
@@ -131,16 +143,15 @@ export async function fetchKpis(): Promise<Kpis> {
 }
 
 export async function fetchAirports(): Promise<Airport[]> {
-  const rows = await q(
+  const result = await rows(
     "SELECT a.airport_icao AS icao, a.iata_code AS iata, a.name, a.municipality AS city, " +
       "a.iso_country AS country, a.latitude_deg AS lat, a.longitude_deg AS lon, " +
       "a.elevation_ft, a.type, a.score, COALESCE(m.total_flights, 0) AS total_flights, " +
       "m.avg_delay_minutes, m.on_time_rate " +
-      "FROM main.dim_airport a LEFT JOIN main.gold_airport_metrics m " +
-      "ON m.airport_icao = a.airport_icao ORDER BY a.airport_icao",
-    3000
+      "FROM dim_airport a LEFT JOIN gold_airport_metrics m " +
+      "ON m.airport_icao = a.airport_icao ORDER BY a.airport_icao"
   );
-  return rows.map((r) => ({
+  return result.map((r) => ({
     icao: str(r.icao),
     iata: (r.iata as string | null) ?? null,
     name: str(r.name),
@@ -157,70 +168,77 @@ export async function fetchAirports(): Promise<Airport[]> {
   }));
 }
 
+function layerFor(name: string): string {
+  if (name.startsWith("gold_")) return "gold";
+  if (name.startsWith("fact_")) return "fact";
+  if (name.startsWith("dim_")) return "dim";
+  return "raw";
+}
+
 export async function fetchCatalog(): Promise<Catalog> {
-  const tables = await q<{
-    table_schema: string;
-    table_name: string;
-    table_type: string;
-  }>(
-    "SELECT table_schema, table_name, table_type FROM information_schema.tables " +
-      "WHERE table_schema IN ('main','staging','marts','reports') " +
-      "ORDER BY table_schema, table_name",
-    500
+  const tableRows = await rows<{ name: string; type: string }>(
+    "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') " +
+      "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name"
   );
-  const out: CatalogTable[] = [];
-  for (const t of tables) {
-    const cols = await q<{ column_name: string; data_type: string; is_nullable: string }>(
-      `SELECT column_name, data_type, is_nullable FROM information_schema.columns ` +
-        `WHERE table_schema = '${str(t.table_schema)}' AND table_name = '${str(t.table_name)}' ` +
-        `ORDER BY ordinal_position`,
-      200
-    ).catch((): Array<{ column_name: string; data_type: string; is_nullable: string }> => []);
-    const count = await scalar<number>(
-      `SELECT COUNT(*) FROM "${str(t.table_schema)}"."${str(t.table_name)}"`,
-      0
-    ).catch(() => 0);
-    const layer = t.table_name.startsWith("gold_")
-      ? "gold"
-      : t.table_name.startsWith("fact_")
-        ? "fact"
-        : t.table_name.startsWith("dim_")
-          ? "dim"
-          : t.table_schema === "marts" || t.table_schema === "staging"
-            ? t.table_schema
-            : "raw";
-    out.push({
-      schema: str(t.table_schema),
-      name: str(t.table_name),
-      kind: str(t.table_type),
-      layer,
-      rows: count,
-      columns: cols.map((c) => ({
-        name: str(c.column_name),
-        type: str(c.data_type),
-        nullable: str(c.is_nullable) === "YES",
-      })),
-    });
+  const names = tableRows.map((t) => str(t.name)).filter(Boolean);
+
+  // Column metadata for every table in one round trip.
+  let columnSets: Record<string, Array<{ name: string; type: string; notnull: number }>> = {};
+  let counts: Record<string, number> = {};
+  try {
+    const [columns, rowCounts] = await Promise.all([
+      tursoBatch(names.map((n) => `PRAGMA table_info("${n.replace(/"/g, "")}")`)),
+      tursoBatch(names.map((n) => `SELECT COUNT(*) AS n FROM "${n.replace(/"/g, "")}"`)),
+    ]);
+    columnSets = Object.fromEntries(
+      names.map((n, i) => [
+        n,
+        columns[i].rows.map((c) => ({
+          name: str(c.name),
+          type: str(c.type),
+          notnull: num(c.notnull),
+        })),
+      ])
+    );
+    counts = Object.fromEntries(
+      names.map((n, i) => [n, num(Object.values(rowCounts[i].rows[0] ?? {})[0])])
+    );
+  } catch {
+    /* metadata is best-effort; tables still render */
   }
+
+  const tables: CatalogTable[] = names.map((name) => ({
+    schema: "main",
+    name,
+    kind: tableRows.find((t) => t.name === name)?.type === "view" ? "VIEW" : "BASE TABLE",
+    layer: layerFor(name),
+    rows: counts[name] ?? 0,
+    columns: (columnSets[name] ?? []).map((c) => ({
+      name: c.name,
+      type: c.type,
+      nullable: c.notnull === 0,
+    })),
+  }));
+
   let lineage: Catalog["lineage"] = { nodes: [], edges: [], sources: [] };
   try {
-    const { rows } = await runMotherDuck(
-      "SELECT payload_json FROM main.site_lineage WHERE key = 'lineage' LIMIT 1"
+    const { rows: lrows } = await tursoQuery(
+      "SELECT payload_json FROM site_lineage WHERE key = 'lineage' LIMIT 1"
     );
-    const raw = rows[0]?.payload_json;
+    const raw = lrows[0]?.payload_json;
     if (typeof raw === "string") lineage = { ...lineage, ...(JSON.parse(raw) as Catalog["lineage"]) };
   } catch {
     /* lineage unavailable — tables still render */
   }
-  return { tables: out, lineage };
+  return { tables, lineage };
 }
 
 export async function fetchStories(): Promise<Story[]> {
-  const { rows } = await runMotherDuck(
+  const { rows: out } = await tursoQuery(
     "SELECT id, category, tone, title, metric, unit, narrative, chart_json " +
-      "FROM main.site_stories ORDER BY id"
+      "FROM site_stories ORDER BY id"
   );
-  return rows.map((r) => ({
+  return out.map((r) => ({
     id: str(r.id),
     category: str(r.category),
     tone: (["info", "warning", "critical", "positive"] as const).includes(r.tone as never)
@@ -244,10 +262,10 @@ export async function fetchOps(): Promise<Ops> {
   let pipeline: Ops["pipeline"] = null;
   let quality: Ops["quality"] = null;
   try {
-    const { rows } = await runMotherDuck(
-      "SELECT payload_json FROM main.site_ops WHERE key = 'latest' LIMIT 1"
+    const { rows: out } = await tursoQuery(
+      "SELECT payload_json FROM site_ops WHERE key = 'latest' LIMIT 1"
     );
-    const raw = rows[0]?.payload_json;
+    const raw = out[0]?.payload_json;
     if (typeof raw === "string") {
       const parsed = JSON.parse(raw) as { pipeline?: Ops["pipeline"]; quality?: Ops["quality"] };
       pipeline = parsed.pipeline ?? null;
@@ -257,8 +275,6 @@ export async function fetchOps(): Promise<Ops> {
     /* ops reports unavailable */
   }
 
-  // Live collector health comes from /live/status, whose shape is per-section
-  // counts + ages (not the legacy stream_health counters).
   let stream_health: Ops["stream_health"] = [];
   const status = await tryLiveApi<LiveStatusResponse>("/live/status", 5000);
   if (status?.sections) {
@@ -277,40 +293,22 @@ export async function fetchOps(): Promise<Ops> {
   return { stream_health, pipeline, quality };
 }
 
-export interface BatchFreshness {
-  /** Newest batch record across the warehouse, ISO string or null when empty. */
-  asOf: string | null;
-  totalFlights: number;
-  hasFlights: boolean;
-}
-
-/** When the Gold layer was last refreshed + whether flight history exists. */
-export async function fetchFreshness(): Promise<BatchFreshness> {
-  const [asOfFlights, asOfPositions, asOfWeather, totalFlights] = await Promise.all([
-    scalar<string | null>("SELECT MAX(collected_at) FROM main.fact_flights", null),
-    scalar<string | null>("SELECT MAX(collected_at) FROM main.fact_positions", null),
-    scalar<string | null>("SELECT MAX(collected_at) FROM main.weather", null),
-    scalar<number>("SELECT COUNT(*) FROM main.fact_flights", 0),
-  ]);
-  const candidates = [asOfFlights, asOfPositions, asOfWeather].filter(
-    (v): v is string => typeof v === "string" && v.length > 0
-  );
-  candidates.sort();
-  return {
-    asOf: candidates.length ? candidates[candidates.length - 1] : null,
-    totalFlights,
-    hasFlights: totalFlights > 0,
-  };
+interface LiveStatusResponse {
+  status: string;
+  sections: Record<string, number>;
+  updatedAt: Record<string, string>;
+  ageSeconds: Record<string, number | null>;
+  maxAgeSeconds: number;
 }
 
 export async function fetchManifest(): Promise<BundleManifest> {
   const [airportCount, flightCount, positionCount] = await Promise.all([
-    scalar<number>("SELECT COUNT(*) FROM main.dim_airport", 0).catch(() => 0),
-    scalar<number>("SELECT COUNT(*) FROM main.fact_flights", 0).catch(() => 0),
-    scalar<number>("SELECT COUNT(*) FROM main.fact_positions", 0).catch(() => 0),
+    scalar<number>("SELECT COUNT(*) FROM dim_airport", 0),
+    scalar<number>("SELECT COUNT(*) FROM fact_flights", 0),
+    scalar<number>("SELECT COUNT(*) FROM fact_positions", 0),
   ]);
   return {
-    version: 3,
+    version: 4,
     generated_at: new Date().toISOString(),
     counts: { airports: airportCount, flights: flightCount, positions: positionCount },
     files: [
@@ -325,7 +323,7 @@ export async function fetchManifest(): Promise<BundleManifest> {
       "ops.json",
       "manifest.json",
     ],
-    sources: { runtime: "motherduck+vps", version: 3 },
+    sources: { runtime: "turso+vps", version: 4 },
   };
 }
 

@@ -289,9 +289,9 @@ export async function loadBundle<T>(file: string): Promise<T> {
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.promise as Promise<T>;
 
   const promise = (async (): Promise<T> => {
-    // Runtime sources: MotherDuck Gold for analytics, the VPS live snapshot
-    // for live files. No build-time static bundle exists anymore.
-    const md = await import("./motherduckData");
+    // Runtime sources: Turso for Gold analytics, the VPS live snapshot for
+    // live files. No build-time static bundle exists.
+    const md = await import("./tursoData");
     switch (file) {
       case "analytics.json":
         return (await md.fetchAnalytics()) as T;

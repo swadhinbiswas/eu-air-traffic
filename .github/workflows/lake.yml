@@ -32,6 +32,8 @@ jobs:
       HF_REPO: ${{ vars.HF_REPO || secrets.HF_REPO }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       MOTHERDUCK_DATABASE: ${{ vars.MOTHERDUCK_DATABASE || 'my_db' }}
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       WAREHOUSE_TARGET: local
       DBT_TARGET: dev
       # Absolute path: dbt resolves relative paths from the process cwd, which is
@@ -51,7 +53,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra stream
+        run: uv sync --extra dev --extra stream --extra turso
 
       - name: Materialise the Kafka CA certificate
         # The PEM lives in a secret as text; the client expects a file path.
@@ -96,6 +98,10 @@ jobs:
 
       - name: Publish site tables (stories, ops, lineage) to MotherDuck
         run: uv run python -m scripts.publish_site_tables
+        continue-on-error: true
+
+      - name: Publish serving copy to Turso (the site reads this)
+        run: uv run python -m scripts.publish_turso
         continue-on-error: true
 
       - name: Upload quality report

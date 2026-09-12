@@ -47,6 +47,10 @@ dev = [
 stream = [
     "kafka-python-ng>=2.2.0",
 ]
+# Turso (libSQL) serving layer for the dashboard.
+turso = [
+    "libsql-client>=0.3.1",
+]
 
 [project.scripts]
 air-traffic-orchestrate = "pipelines.orchestrator:main"
