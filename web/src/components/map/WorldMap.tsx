@@ -64,13 +64,21 @@ function AutoRotate({ enabled }: { enabled: boolean }) {
     map.on("wheel", pause);
     map.on("dragend", resume);
 
+    // Spinning the globe re-lays-out every aircraft symbol each frame, which is
+    // very expensive once zoomed in — so rotate only at world scale.
+    const MAX_ROTATE_ZOOM = 2.5;
+    const ROTATE_INTERVAL_MS = 120;
+
     let raf = 0;
     const tick = (time: number) => {
       if (
         enabledRef.current &&
         !pausedRef.current &&
+        !document.hidden &&
         !map.isMoving() &&
-        time - lastRef.current > 60
+        !map.isZooming() &&
+        map.getZoom() < MAX_ROTATE_ZOOM &&
+        time - lastRef.current > ROTATE_INTERVAL_MS
       ) {
         lastRef.current = time;
         const center = map.getCenter();

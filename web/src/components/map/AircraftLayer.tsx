@@ -6,6 +6,9 @@ import { ALT_BANDS, loadImage, planeDataUrl } from "./planeIcons";
 
 const SOURCE_ID = "aircraft-src";
 const EMERGENCY_IMAGE = "plane-emergency";
+// Re-serialising thousands of aircraft into MapLibre is expensive; update the
+// source at most this often and never mid-gesture.
+const MIN_PUSH_MS = 1500;
 
 interface AircraftLayerProps {
   aircraft: Aircraft[];
@@ -56,6 +59,7 @@ export function AircraftLayer({ aircraft, visible, onSelect }: AircraftLayerProp
   const { map, isLoaded } = useMap();
   const dataRef = useRef<Aircraft[]>(aircraft);
   const onSelectRef = useRef(onSelect);
+  const lastPushRef = useRef(0);
   dataRef.current = aircraft;
   onSelectRef.current = onSelect;
 
@@ -171,7 +175,29 @@ export function AircraftLayer({ aircraft, visible, onSelect }: AircraftLayerProp
   useEffect(() => {
     if (!map || !isLoaded) return;
     const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-    source?.setData(toGeoJson(aircraft));
+    if (!source) return;
+
+    const push = () => {
+      lastPushRef.current = performance.now();
+      source.setData(toGeoJson(dataRef.current));
+    };
+
+    // Never rebuild the source while the map is moving: MapLibre is already
+    // re-tiling, and pushing 5k features mid-zoom is what makes it crawl.
+    if (map.isMoving() || map.isZooming()) {
+      map.once("idle", push);
+      return () => {
+        map.off("idle", push);
+      };
+    }
+
+    const wait = MIN_PUSH_MS - (performance.now() - lastPushRef.current);
+    if (wait <= 0) {
+      push();
+      return;
+    }
+    const timer = setTimeout(push, wait);
+    return () => clearTimeout(timer);
   }, [map, isLoaded, aircraft]);
 
   useEffect(() => {
