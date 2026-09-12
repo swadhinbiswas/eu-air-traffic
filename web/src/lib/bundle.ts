@@ -270,17 +270,14 @@ export interface BundleManifest {
 }
 
 // ── loaders ─────────────────────────────────────────────────────────────────
-// Default to the local FastAPI service so local development automatically uses
-// the native backend; static deployments fall back to the bundled data because
-// localhost is unreachable (each `tryLive` call fails fast and silently).
-// Warehouse/analytics API (Turso-backed). Defaults to the local FastAPI
-// service in development; at runtime this is the deployed API.
+// Warehouse/analytics API (Turso-backed) and the live API served by the VPS
+// collector. Both fall back to the deployed host so a missing build variable
+// can never take the site down. Override with VITE_API_URL / VITE_LIVE_URL.
 // .trim() because a stray trailing space in a build variable produces a URL
 // that silently fails every request.
-const API =
-  (import.meta.env.VITE_API_URL as string | undefined)?.trim() || "http://localhost:8000";
-// Live API served by the VPS collector (CORS-enabled live snapshot + bundles).
-const LIVE = (import.meta.env.VITE_LIVE_URL as string | undefined)?.trim() || "";
+const FALLBACK_API = "https://vps.swadhin.cv";
+const API = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || FALLBACK_API;
+const LIVE = (import.meta.env.VITE_LIVE_URL as string | undefined)?.trim() || FALLBACK_API;
 
 // Short-lived client cache so several components on a page share one request
 // without pinning stale data (the server caches for longer anyway).
