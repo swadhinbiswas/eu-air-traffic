@@ -144,3 +144,26 @@ def test_row_update_is_upserted_not_duplicated(tmp_path):
 def test_no_url_is_a_noop(tmp_path):
     publisher = TursoPublisher(url=None, token=None, db_path=tmp_path / "missing.duckdb")
     assert publisher.run() == {}
+
+
+def test_http_args_follow_hrana_v2_encoding():
+    """Integers are strings, floats must be JSON numbers (Turso rejects strings)."""
+    from scripts.publish_turso import _TursoHttpClient
+
+    assert _TursoHttpClient._arg(4) == {"type": "integer", "value": "4"}
+    assert _TursoHttpClient._arg(4.5) == {"type": "float", "value": 4.5}
+    assert _TursoHttpClient._arg(True) == {"type": "integer", "value": "1"}
+    assert _TursoHttpClient._arg(None) == {"type": "null"}
+    assert _TursoHttpClient._arg("EDDF") == {"type": "text", "value": "EDDF"}
+    assert _TursoHttpClient._arg(float("nan")) == {"type": "null"}
+    assert _TursoHttpClient._arg(float("inf")) == {"type": "null"}
+
+
+def test_http_client_builds_pipeline_endpoint():
+    from scripts.publish_turso import _TursoHttpClient
+
+    client = _TursoHttpClient("libsql://db.turso.io", "token")
+    try:
+        assert client._endpoint == "https://db.turso.io/v2/pipeline"
+    finally:
+        client.close()

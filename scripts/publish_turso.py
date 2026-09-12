@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import math
 import json
 from datetime import date, datetime
 from decimal import Decimal
@@ -123,7 +124,11 @@ class _TursoHttpClient:
         if isinstance(value, int):
             return {"type": "integer", "value": str(value)}
         if isinstance(value, float):
-            return {"type": "float", "value": repr(value)}
+            # Hrana encodes integers as strings (to dodge JSON precision loss)
+            # but floats must be JSON numbers, and JSON cannot hold NaN/Inf.
+            if math.isnan(value) or math.isinf(value):
+                return {"type": "null"}
+            return {"type": "float", "value": value}
         if isinstance(value, (bytes, bytearray)):
             return {"type": "blob", "base64": base64.b64encode(bytes(value)).decode("ascii")}
         return {"type": "text", "value": str(value)}
