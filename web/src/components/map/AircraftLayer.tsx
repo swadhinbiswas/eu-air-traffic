@@ -6,17 +6,42 @@ import { ALT_BANDS, loadImage, planeDataUrl } from "./planeIcons";
 
 const SOURCE_ID = "aircraft-src";
 const EMERGENCY_IMAGE = "plane-emergency";
+const SELECTED_LAYER = "aircraft-selected";
 // Re-serialising thousands of aircraft into MapLibre is expensive; update the
 // source at most this often and never mid-gesture.
 const MIN_PUSH_MS = 1500;
+// Below this zoom the whole continent fits on screen, so culling would remove
+// nothing; above it we only ship what is actually visible.
+const CULL_MIN_ZOOM = 4;
+// Safety cap so a busy world view cannot exceed what the GPU can draw cheaply.
+const MAX_WORLD_FEATURES = 4000;
+// A filter that matches nothing, used until an aircraft is selected.
+const EMPTY_FILTER = ["==", ["get", "hex"], "__none__"] as never;
 
 interface AircraftLayerProps {
   aircraft: Aircraft[];
   visible: boolean;
+  selectedHex?: string | null;
   onSelect?: (aircraft: Aircraft) => void;
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+/** Aircraft worth drawing: everything at world scale, viewport-only when zoomed. */
+function visibleAircraft(map: MapLibreMap, aircraft: Aircraft[]): Aircraft[] {
+  if (map.getZoom() < CULL_MIN_ZOOM) {
+    return aircraft.length > MAX_WORLD_FEATURES ? aircraft.slice(0, MAX_WORLD_FEATURES) : aircraft;
+  }
+  const bounds = map.getBounds();
+  const pad = 0.25; // degrees of margin so edge traffic doesn't pop in
+  const south = bounds.getSouth() - pad;
+  const north = bounds.getNorth() + pad;
+  const west = bounds.getWest() - pad;
+  const east = bounds.getEast() + pad;
+  return aircraft.filter(
+    (a) => a.lat >= south && a.lat <= north && a.lon >= west && a.lon <= east
+  );
+}
 
 function toGeoJson(aircraft: Aircraft[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
@@ -55,11 +80,12 @@ function toGeoJson(aircraft: Aircraft[]): GeoJSON.FeatureCollection {
  * band (filter-only colouring) plus a dedicated emergency layer that overrides
  * band colour for squawk 7500/7600/7700 or ADS-B emergency flags.
  */
-export function AircraftLayer({ aircraft, visible, onSelect }: AircraftLayerProps) {
+export function AircraftLayer({ aircraft, visible, selectedHex, onSelect }: AircraftLayerProps) {
   const { map, isLoaded } = useMap();
   const dataRef = useRef<Aircraft[]>(aircraft);
   const onSelectRef = useRef(onSelect);
   const lastPushRef = useRef(0);
+  const pushRef = useRef<(() => void) | null>(null);
   dataRef.current = aircraft;
   onSelectRef.current = onSelect;
 
@@ -154,15 +180,52 @@ export function AircraftLayer({ aircraft, visible, onSelect }: AircraftLayerProp
         });
       }
 
-      const source = instance.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-      source?.setData(toGeoJson(dataRef.current));
+      const selected = "aircraft-selected";
+      if (!instance.getLayer(selected)) {
+        // A ring around the aircraft the user has selected.
+        instance.addLayer({
+          id: selected,
+          type: "circle",
+          source: SOURCE_ID,
+          filter: EMPTY_FILTER,
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 6, 13, 10, 18],
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": "#34d399",
+            "circle-stroke-width": 1.8,
+            "circle-stroke-opacity": 0.9,
+          },
+        });
+      }
+
+      // Cull to the viewport and push in one place so updates and re-culls
+      // share the same path.
+      const push = () => {
+        lastPushRef.current = performance.now();
+        const source = instance.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+        source?.setData(toGeoJson(visibleAircraft(instance, dataRef.current)));
+      };
+      pushRef.current = push;
+
+      const onMoveEnd = () => push();
+      instance.on("moveend", onMoveEnd);
+      cleanupMoveEnd = () => instance.off("moveend", onMoveEnd);
+
+      push();
     }
 
+    let cleanupMoveEnd: (() => void) | null = null;
     void setup(map);
 
     return () => {
       cancelled = true;
-      const layers = [...ALT_BANDS.map((b) => `aircraft-${b.id}`), "aircraft-emergency"];
+      cleanupMoveEnd?.();
+      pushRef.current = null;
+      const layers = [
+        ...ALT_BANDS.map((b) => `aircraft-${b.id}`),
+        "aircraft-emergency",
+        "aircraft-selected",
+      ];
       for (const id of layers) {
         map.off("click", id, handleClick);
         if (map.getLayer(id)) map.removeLayer(id);
@@ -174,35 +237,42 @@ export function AircraftLayer({ aircraft, visible, onSelect }: AircraftLayerProp
 
   useEffect(() => {
     if (!map || !isLoaded) return;
-    const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-    if (!source) return;
 
-    const push = () => {
-      lastPushRef.current = performance.now();
-      source.setData(toGeoJson(dataRef.current));
-    };
+    const schedule = () => pushRef.current?.();
 
     // Never rebuild the source while the map is moving: MapLibre is already
     // re-tiling, and pushing 5k features mid-zoom is what makes it crawl.
     if (map.isMoving() || map.isZooming()) {
-      map.once("idle", push);
+      map.once("idle", schedule);
       return () => {
-        map.off("idle", push);
+        map.off("idle", schedule);
       };
     }
 
     const wait = MIN_PUSH_MS - (performance.now() - lastPushRef.current);
     if (wait <= 0) {
-      push();
+      schedule();
       return;
     }
-    const timer = setTimeout(push, wait);
+    const timer = setTimeout(schedule, wait);
     return () => clearTimeout(timer);
   }, [map, isLoaded, aircraft]);
 
   useEffect(() => {
+    if (!map || !isLoaded || !map.getLayer(SELECTED_LAYER)) return;
+    map.setFilter(
+      SELECTED_LAYER,
+      (selectedHex ? ["==", ["get", "hex"], selectedHex] : EMPTY_FILTER) as never
+    );
+  }, [map, isLoaded, selectedHex]);
+
+  useEffect(() => {
     if (!map || !isLoaded) return;
-    const layers = [...ALT_BANDS.map((b) => `aircraft-${b.id}`), "aircraft-emergency"];
+    const layers = [
+      ...ALT_BANDS.map((b) => `aircraft-${b.id}`),
+      "aircraft-emergency",
+      SELECTED_LAYER,
+    ];
     for (const id of layers) {
       if (map.getLayer(id)) {
         map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");

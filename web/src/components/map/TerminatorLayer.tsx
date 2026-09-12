@@ -67,6 +67,9 @@ export function TerminatorLayer({ visible }: { visible: boolean }) {
         id: FILL_ID,
         type: "fill",
         source: SOURCE_ID,
+        // Past regional zoom the night polygon becomes a full-screen overdraw
+        // that hides nothing useful; stop drawing it.
+        maxzoom: 7,
         paint: { "fill-color": "#000000", "fill-opacity": 0.42 },
         layout: { visibility: visible ? "visible" : "none" },
       });
