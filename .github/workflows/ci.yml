@@ -66,7 +66,10 @@ jobs:
           if-no-files-found: ignore
 
   e2e:
-    name: End-to-end mock pipeline
+    # Smoke test the whole pipeline against synthetic data on the runner. It has
+    # no Kafka/HF/MotherDuck/Turso credentials, and the pipeline itself refuses
+    # to upload in mock mode, so nothing it does can reach the real lake.
+    name: Pipeline smoke test (synthetic data, no uploads)
     runs-on: ubuntu-latest
     env:
       MOCK_MODE: "true"
