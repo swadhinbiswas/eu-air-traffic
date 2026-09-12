@@ -154,6 +154,11 @@ _EMPTY_DIM_ROUTE = {
     c: ("DOUBLE" if c in _DIM_ROUTE_NUMERIC else "VARCHAR") for c in _DIM_ROUTE_COLUMNS
 }
 
+# Bound the live-position serving table: only aircraft seen inside this window,
+# and never more than this many rows (uploaded to Turso every run).
+LIVE_POSITION_WINDOW_HOURS = 1
+LIVE_POSITION_MAX_ROWS = 5_000
+
 _FACT_POSITIONS_COLUMNS = (
     "icao24",
     "callsign",
@@ -401,7 +406,13 @@ class WarehouseBuilder:
         logger.info("[warehouse] weather rows=%s", weather.height)
 
     def build_fact_positions(self) -> None:
-        """Latest live aircraft position per airframe (with class + CO₂)."""
+        """Latest live aircraft position per airframe (with class + CO₂).
+
+        Bounded twice: only aircraft seen within the recent window of the data
+        (the site shows the current picture, not every airframe ever tracked),
+        and at most ``LIVE_POSITION_MAX_ROWS`` rows. Without this the table
+        grew without bound and every Turso run re-uploaded all of it.
+        """
         positions = self._read_silver("positions")
         if positions.is_empty():
             self._create_or_replace_empty("fact_positions", _EMPTY_FACT_POSITIONS)
@@ -409,7 +420,27 @@ class WarehouseBuilder:
         fact = _ensure_columns(
             positions, _FACT_POSITIONS_COLUMNS, _POSITION_NUMERIC, _POSITION_BOOLEAN
         )
-        fact = fact.unique(subset=["icao24"], keep="last")
+        if "collected_at" in fact.columns:
+            # Silver keeps collected_at as an ISO string; parse just for the
+            # window comparison and keep the original column untouched.
+            fact = fact.with_columns(
+                pl.col("collected_at")
+                .str.to_datetime(strict=False)
+                .dt.replace_time_zone("UTC")
+                .alias("_seen_at")
+            )
+            cutoff = fact["_seen_at"].max()
+            if isinstance(cutoff, _dt.datetime):
+                fact = fact.filter(
+                    pl.col("_seen_at") >= cutoff - _dt.timedelta(hours=LIVE_POSITION_WINDOW_HOURS)
+                )
+            # Newest first: dedup keeps the freshest row per airframe, and the
+            # cap keeps the most recent aircraft.
+            fact = fact.sort("_seen_at", descending=True)
+            fact = fact.unique(subset=["icao24"], keep="first")
+            fact = fact.head(LIVE_POSITION_MAX_ROWS).drop("_seen_at")
+        else:
+            fact = fact.unique(subset=["icao24"], keep="last")
         self._load_replace("fact_positions", fact)
         logger.info("[warehouse] fact_positions rows=%s", fact.height)
 
