@@ -65,7 +65,11 @@ class CollectorService:
             return True
         interval = self.settings.positions_publish_interval_seconds
         now = time.monotonic()
-        if now - self._last_publish.get(source.name, 0.0) >= interval:
+        last = self._last_publish.get(source.name)
+        # "Never published" must be due immediately. Comparing against 0.0 relied
+        # on system uptime exceeding the interval, so a freshly booted host (CI)
+        # would skip the first publish.
+        if last is None or now - last >= interval:
             self._last_publish[source.name] = now
             return True
         return False

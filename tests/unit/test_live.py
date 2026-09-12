@@ -186,6 +186,7 @@ def test_collector_publishes_positions_on_a_slower_cadence(monkeypatch) -> None:
     """Positions update the live store every tick but hit Kafka rarely."""
     from datetime import UTC, datetime
 
+    import services.collector as collector_module
     from services.collector import CollectorService
     from services.sources.base import Source
 
@@ -204,11 +205,19 @@ def test_collector_publishes_positions_on_a_slower_cadence(monkeypatch) -> None:
                 }
             ]
 
+    # A freshly booted host: monotonic() is far below the publish interval.
+    # Regression guard — the first poll must still be due.
+    clock = {"t": 10.0}
+    monkeypatch.setattr(collector_module.time, "monotonic", lambda: clock["t"])
+
     svc = CollectorService(sources=[Dummy()])
-    # First poll is due immediately; the next one is not.
-    assert svc.poll_once(svc.sources[0]) == 1
-    assert svc.poll_once(svc.sources[0]) == 0
+    assert svc.poll_once(svc.sources[0]) == 1, "first poll must publish immediately"
+    assert svc.poll_once(svc.sources[0]) == 0, "second poll is inside the interval"
     assert svc.store.snapshot()["counts"]["positions"] == 1
+
+    # Once the interval has elapsed it publishes again.
+    clock["t"] += svc.settings.positions_publish_interval_seconds + 1
+    assert svc.poll_once(svc.sources[0]) == 1
 
 
 def test_ground_vehicle_emissions_are_zero() -> None:
