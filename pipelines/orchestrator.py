@@ -105,7 +105,7 @@ class Orchestrator:
             _step(report, "gold", self._gold)
         if report.success:
             _step(report, "quality", self._quality)
-        if report.success and self.settings.huggingface_token:
+        if report.success and self.settings.huggingface_token and not self.settings.mock_mode:
             _step(report, "upload_hf", self._upload_hf)
         else:
             report.steps["upload_hf"] = {"status": "skipped", "result": "HF_TOKEN not set"}

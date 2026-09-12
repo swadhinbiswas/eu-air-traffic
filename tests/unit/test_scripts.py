@@ -91,6 +91,7 @@ def test_upload_hf_skips_without_token(monkeypatch):
     class _FakeSettings:
         huggingface_token = ""
         huggingface_repo = "x/y"
+        mock_mode = False
         silver_dir = upload_hf.settings.silver_dir
         gold_dir = upload_hf.settings.gold_dir
         duckdb_path = upload_hf.settings.duckdb_path

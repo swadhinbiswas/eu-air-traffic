@@ -19,6 +19,19 @@ from config.settings import settings
 from services import hf_lake
 
 
+def _assert_not_mock(action: str) -> None:
+    """Mock data must never reach the lake.
+
+    A CI run with MOCK_MODE=true once defaulted onto the schedule and uploaded
+    synthetic flights/weather, which then failed the dbt build downstream.
+    """
+    if settings.mock_mode:
+        raise SystemExit(
+            f"[lake_sync] refusing to {action} with MOCK_MODE=true — "
+            "the lake must only ever contain real data."
+        )
+
+
 def pull_bronze() -> int:
     return hf_lake.download_prefix(
         f"{settings.hf_bronze_prefix}/parquet", settings.warehouse_dir, app_settings=settings
@@ -26,6 +39,7 @@ def pull_bronze() -> int:
 
 
 def push_silver() -> int:
+    _assert_not_mock("push silver")
     return hf_lake.upload_directory(
         settings.silver_dir, settings.hf_silver_prefix, app_settings=settings
     )
