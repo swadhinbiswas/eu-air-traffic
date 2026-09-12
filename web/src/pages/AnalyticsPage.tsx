@@ -163,7 +163,7 @@ export function AnalyticsPage() {
   }, [fleet.aircraft, fleet.source]);
 
   if (loading) return <Spinner label="Loading analytics" />;
-  if (error || !analytics) return <ErrorState message={error ?? "No analytics bundle found"} />;
+  if (error || !analytics) return <ErrorState message={error ?? "No analytics data available"} />;
 
   const topAirports = [...analytics.gold_airport_metrics]
     .sort((a, b) => Number(b.total_flights) - Number(a.total_flights))

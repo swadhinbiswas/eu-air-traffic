@@ -7,6 +7,7 @@ import {
   Database,
   GitBranch,
   Globe2,
+  Code2,
   Radio,
   Sparkles,
   Table2,
@@ -42,6 +43,9 @@ export function AppShell() {
   const location = useLocation();
   const isGlobe = location.pathname === "/";
   const { data: manifest } = useManifest();
+  const totalRecords = manifest
+    ? Object.values(manifest.counts).reduce((a, b) => a + b, 0)
+    : 0;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-black">
@@ -51,16 +55,11 @@ export function AppShell() {
             <Radio className="h-4 w-4" />
           </div>
           <div className="leading-tight">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold tracking-tight text-zinc-100">
-                EU Air Traffic
-              </span>
-              <span className="hidden rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-emerald-400 sm:block">
-                God&apos;s Eye
-              </span>
-            </div>
+            <span className="block text-sm font-semibold tracking-tight text-zinc-100">
+              EU Air Traffic
+            </span>
             <span className="hidden text-[10px] text-zinc-500 md:block">
-              Medallion · Bronze → Silver → Gold
+              European airspace intelligence
             </span>
           </div>
         </div>
@@ -87,10 +86,12 @@ export function AppShell() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-1.5 text-xs text-zinc-500 xl:flex">
-            <GitBranch className="h-3.5 w-3.5" />
-            {manifest ? `${Object.values(manifest.counts).reduce((a, b) => a + b, 0).toLocaleString()} records` : "connecting…"}
-          </span>
+          {totalRecords > 0 && (
+            <span className="hidden items-center gap-1.5 text-xs text-zinc-500 xl:flex">
+              <GitBranch className="h-3.5 w-3.5" />
+              {totalRecords.toLocaleString()} records
+            </span>
+          )}
           <Clock />
           <a
             href="https://github.com/swadhinbiswas/air-traffic"
@@ -99,7 +100,7 @@ export function AppShell() {
             className="grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-500 transition-colors hover:text-zinc-100"
             aria-label="GitHub"
           >
-            <Database className="h-3.5 w-3.5" />
+            <Code2 className="h-3.5 w-3.5" />
           </a>
         </div>
       </header>

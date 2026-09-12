@@ -143,7 +143,7 @@ function BackgroundClick({ onClear }: { onClear: () => void }) {
 }
 
 /**
- * The God's Eye View: a MapLibre globe (dark CARTO Earth tiles) with live
+ * The live globe view: a MapLibre globe (dark CARTO Earth tiles) with live
  * aircraft, airports, route arcs, aviation weather, precipitation radar and a
  * day/night terminator.
  */
