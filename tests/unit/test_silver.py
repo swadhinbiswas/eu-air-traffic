@@ -47,6 +47,33 @@ def test_transform_flights_deduplicates_and_drops_bad():
     assert out["delay_minutes"].min() >= 0
 
 
+def test_transform_flights_accepts_one_known_end():
+    """OpenSky usually estimates only one end of a movement."""
+    df = pl.DataFrame(
+        {
+            "flight_id": ["DEP1", "ARR1", "BAD1", "SAME"],
+            "departure_icao": ["EDDF", None, None, "EDDF"],
+            "arrival_icao": [None, "EGLL", None, "EDDF"],
+        }
+    )
+    out = transform_flights(df)
+    # Departure-only and arrival-only survive; nothing-known and same-end drop.
+    assert set(out["flight_id"].to_list()) == {"DEP1", "ARR1"}
+
+
+def test_transform_flights_prefers_complete_record_on_duplicate():
+    df = pl.DataFrame(
+        {
+            "flight_id": ["A1", "A1"],
+            "departure_icao": ["EDDF", "EDDF"],
+            "arrival_icao": [None, "EGLL"],
+        }
+    )
+    out = transform_flights(df)
+    assert out.height == 1
+    assert out["arrival_icao"].to_list() == ["EGLL"]
+
+
 def test_transform_flights_utc_normalisation():
     out = transform_flights(_flights())
     first = out["scheduled_departure"].dt.replace_time_zone("UTC").to_list()[0]

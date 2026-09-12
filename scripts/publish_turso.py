@@ -17,6 +17,7 @@ fact tables are synced **incrementally** against a watermark kept in Turso's
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 from datetime import date, datetime
 from decimal import Decimal
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+import requests
 
 from config.logging import logger
 from config.settings import settings
@@ -83,6 +85,106 @@ def _value(value: Any) -> Any:
     return json.dumps(value, default=str)
 
 
+class _Rows:
+    """Result wrapper exposing the ``.rows`` attribute the publisher uses."""
+
+    def __init__(self, rows: list[list[Any]]) -> None:
+        self.rows = rows
+
+
+class _TursoHttpClient:
+    """Minimal client for Turso's HTTP pipeline API (``POST /v2/pipeline``).
+
+    The ``libsql-client`` Python package is unmaintained and speaks the retired
+    Hrana v1 protocol (``wss://`` + ``/v1/execute``), which Turso rejects with
+    HTTP 400. The v2 pipeline is the same protocol ``@libsql/client/web`` uses
+    in the browser, so the write path and the read path agree.
+    """
+
+    def __init__(self, url: str, token: str, timeout: float = 60.0) -> None:
+        base = url
+        for scheme in ("libsql://", "wss://"):
+            if base.startswith(scheme):
+                base = "https://" + base[len(scheme) :]
+        self._endpoint = base.rstrip("/") + "/v2/pipeline"
+        self._timeout = timeout
+        self._session = requests.Session()
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self._session.headers.update(headers)
+
+    @staticmethod
+    def _arg(value: Any) -> dict[str, Any]:
+        if value is None:
+            return {"type": "null"}
+        if isinstance(value, bool):
+            return {"type": "integer", "value": "1" if value else "0"}
+        if isinstance(value, int):
+            return {"type": "integer", "value": str(value)}
+        if isinstance(value, float):
+            return {"type": "float", "value": repr(value)}
+        if isinstance(value, (bytes, bytearray)):
+            return {"type": "blob", "base64": base64.b64encode(bytes(value)).decode("ascii")}
+        return {"type": "text", "value": str(value)}
+
+    @staticmethod
+    def _cell(cell: dict[str, Any]) -> Any:
+        kind = cell.get("type")
+        if kind == "null":
+            return None
+        if kind == "integer":
+            return int(cell["value"])
+        if kind == "float":
+            return float(cell["value"])
+        if kind == "blob":
+            return base64.b64decode(cell.get("base64") or "")
+        return cell.get("value")
+
+    @staticmethod
+    def _statement(sql: str, args: Any) -> dict[str, Any]:
+        return {
+            "type": "execute",
+            "stmt": {
+                "sql": sql,
+                "args": [_TursoHttpClient._arg(value) for value in (args or [])],
+            },
+        }
+
+    def _pipeline(self, payload: list[dict[str, Any]]) -> list[list[Any]]:
+        response = self._session.post(
+            self._endpoint,
+            json={"requests": payload},
+            timeout=self._timeout,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Turso HTTP {response.status_code}: {response.text[:300]}")
+        results: list[list[Any]] = []
+        for entry in response.json().get("results", []):
+            if entry.get("type") != "ok":
+                message = (entry.get("error") or {}).get("message", "unknown error")
+                raise RuntimeError(f"Turso error: {message}")
+            body = entry.get("response") or {}
+            if body.get("type") != "execute":
+                results.append([])
+                continue
+            result = body.get("result") or {}
+            results.append([[self._cell(cell) for cell in row] for row in result.get("rows", [])])
+        return results
+
+    def execute(self, sql: str, args: Any = None) -> _Rows:
+        rows = self._pipeline([self._statement(sql, args)])
+        return _Rows(rows[0] if rows else [])
+
+    def batch(self, statements: list[tuple[str, Any]]) -> None:
+        payload = [self._statement(sql, args) for sql, args in statements]
+        if payload:
+            self._pipeline(payload)
+
+    def close(self) -> None:
+        self._session.close()
+
+
 class TursoPublisher:
     def __init__(
         self, url: str | None = None, token: str | None = None, db_path: Path | None = None
@@ -96,8 +198,6 @@ class TursoPublisher:
 
     # ── connections ────────────────────────────────────────────────────────
     def _connect(self) -> bool:
-        from libsql_client import create_client_sync
-
         if not self.url:
             logger.warning("[turso] TURSO_DATABASE_URL not set — skipping")
             return False
@@ -105,10 +205,16 @@ class TursoPublisher:
             logger.error("[turso] local warehouse missing: %s", self.db_path)
             return False
         self.local = duckdb.connect(str(self.db_path), read_only=True)
-        kwargs: dict[str, Any] = {"url": self.url}
-        if self.token:
-            kwargs["auth_token"] = self.token
-        self.remote = create_client_sync(**kwargs)
+        if self.url.startswith(("file:", "sqlite:")):
+            # Local libSQL file, used by the tests.
+            from libsql_client import create_client_sync
+
+            kwargs: dict[str, Any] = {"url": self.url}
+            if self.token:
+                kwargs["auth_token"] = self.token
+            self.remote = create_client_sync(**kwargs)
+        else:
+            self.remote = _TursoHttpClient(self.url, self.token or "")
         return True
 
     def _close(self) -> None:
@@ -172,8 +278,6 @@ class TursoPublisher:
 
     # ── writes ─────────────────────────────────────────────────────────────
     def _write_rows(self, table: str, columns: list[str], rows: list[tuple[Any, ...]]) -> int:
-        from libsql_client import Statement
-
         if not rows:
             return 0
         placeholders = ", ".join("?" for _ in columns)
@@ -182,7 +286,7 @@ class TursoPublisher:
         written = 0
         for start in range(0, len(rows), BATCH_SIZE):
             chunk = rows[start : start + BATCH_SIZE]
-            self.remote.batch([Statement(sql, list(row)) for row in chunk])
+            self.remote.batch([(sql, list(row)) for row in chunk])  # type: ignore[union-attr]
             written += len(chunk)
         return written
 
