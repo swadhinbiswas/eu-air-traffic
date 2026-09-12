@@ -64,11 +64,11 @@ class FlightsSource(Source):
         self._session = session or requests.Session()
 
     @property
-    def _auth(self) -> tuple[str, str] | None:
-        s = self.settings
-        if s.opensky_username and s.opensky_password:
-            return (s.opensky_username, s.opensky_password)
-        return None
+    def _auth_kwargs(self) -> dict[str, Any]:
+        from services.opensky_auth import auth_for
+
+        extra_headers, auth = auth_for(self.settings)
+        return {"headers": {**HEADERS, **extra_headers}, "auth": auth}
 
     def _airport_flights(self, icao: str, begin: int, end: int, kind: str) -> list[dict[str, Any]]:
         """``kind`` is ``departure`` or ``arrival``.
@@ -83,9 +83,8 @@ class FlightsSource(Source):
             res = self._session.get(
                 f"{OPENSKY}/flights/{kind}",
                 params=params,
-                headers=HEADERS,
-                auth=self._auth,
                 timeout=self.settings.request_timeout_seconds,
+                **self._auth_kwargs,
             )
         except requests.RequestException as exc:
             logger.debug("[flights] opensky %s %s: %s", kind, icao, exc)

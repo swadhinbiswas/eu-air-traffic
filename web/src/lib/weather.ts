@@ -1,4 +1,10 @@
-import type { FlightCategory, MetarStation, WeatherHour, WeatherStation } from "./bundle";
+import type {
+  FlightCategory,
+  MetarStation,
+  SnapshotMetar,
+  WeatherHour,
+  WeatherStation,
+} from "./bundle";
 
 const MS_TO_KT = 1.94384;
 
@@ -58,6 +64,35 @@ export function fromMetar(m: MetarStation): WeatherStationView {
     clouds: m.clouds ?? [],
     raw: m.rawOb,
     obsTime: m.obsTime,
+    source: "metar",
+    hourly: [],
+  };
+}
+
+/** Adapter for the collector's snapshot rows, which are snake_case. */
+export function fromSnapshotMetar(m: SnapshotMetar): WeatherStationView {
+  const visibility =
+    m.visibility_m !== null
+      ? `${(m.visibility_m / 1000).toFixed(1)} km`
+      : (m.visibility_raw ?? null);
+  return {
+    icao: m.station_icao,
+    name: m.name ?? m.station_icao,
+    lat: m.latitude ?? 0,
+    lon: m.longitude ?? 0,
+    tempC: m.temperature_c,
+    dewpointC: m.dewpoint_c,
+    windDirDeg: m.wind_dir_deg,
+    windKt: m.wind_speed_kt,
+    gustKt: m.gust_kt,
+    visibility,
+    altimeter: m.pressure_hpa,
+    category: (m.flight_category as FlightCategory | null) ?? null,
+    condition: m.condition,
+    cover: m.condition,
+    clouds: [],
+    raw: m.raw_metar,
+    obsTime: m.timestamp,
     source: "metar",
     hourly: [],
   };

@@ -148,6 +148,28 @@ export interface MetarStation {
   obsTime: string | null;
 }
 
+/** METAR row as the collector stores it (snake_case) in the live snapshot. */
+export interface SnapshotMetar {
+  station_icao: string;
+  name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  temperature_c: number | null;
+  dewpoint_c: number | null;
+  wind_dir_deg: number | null;
+  wind_speed_kt: number | null;
+  wind_speed_ms: number | null;
+  gust_kt: number | null;
+  visibility_m: number | null;
+  visibility_raw: string | null;
+  pressure_hpa: number | null;
+  flight_category: string | null;
+  condition: string | null;
+  raw_metar: string | null;
+  timestamp: string | null;
+  humidity_pct: number | null;
+}
+
 export interface MetarResponse {
   source: string;
   generatedAt: string;
@@ -427,7 +449,7 @@ export interface LiveSnapshot {
   positions: CanonicalAircraft[];
   flights: Array<Record<string, unknown>>;
   weather: {
-    metar: MetarStation[];
+    metar: SnapshotMetar[];
     taf: Array<Record<string, unknown>>;
     forecast: WeatherStation[];
   };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { loadBundle, tryLiveApi } from "../lib/bundle";
 import type { LiveSnapshot, WeatherStation } from "../lib/bundle";
-import { fromMetar, fromOpenMeteo, type WeatherStationView } from "../lib/weather";
+import { fromOpenMeteo, fromSnapshotMetar, type WeatherStationView } from "../lib/weather";
 
 export interface LiveWeatherState {
   stations: WeatherStationView[];
@@ -39,7 +39,7 @@ export function useLiveWeather(): LiveWeatherState {
       const snap = await tryLiveApi<LiveSnapshot>("/live/snapshot");
       if (alive && snap?.weather?.metar?.length) {
         setState({
-          stations: snap.weather.metar.map(fromMetar),
+          stations: snap.weather.metar.map(fromSnapshotMetar),
           source: "metar",
           lastUpdated: Date.now(),
         });
