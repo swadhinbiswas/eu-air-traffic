@@ -22,6 +22,8 @@ export interface Aircraft {
   navQnh: number | null;
   magHeading: number | null;
   route: string | null;
+  routeOrigin: string | null;
+  routeDestination: string | null;
   routeSource: string | null;
   squawk: string | null;
   emergency: string | null;
@@ -88,6 +90,8 @@ export function fromLive(l: LiveAircraft): Aircraft {
     navQnh: l.navQnh,
     magHeading: l.magHeading,
     route: null,
+    routeOrigin: null,
+    routeDestination: null,
     routeSource: null,
     squawk: l.squawk,
     emergency: l.emergency,
@@ -131,6 +135,8 @@ export function fromSnapshot(p: Position): Aircraft {
     navQnh: null,
     magHeading: null,
     route: null,
+    routeOrigin: null,
+    routeDestination: null,
     routeSource: null,
     squawk: null,
     emergency: null,
@@ -178,6 +184,8 @@ export function fromApi(row: Record<string, unknown>): Aircraft {
     navQnh: null,
     magHeading: null,
     route: null,
+    routeOrigin: null,
+    routeDestination: null,
     routeSource: null,
     squawk: null,
     emergency: null,
@@ -223,6 +231,8 @@ export function fromCanonical(c: CanonicalAircraft): Aircraft {
     navQnh: num(c.nav_qnh),
     magHeading: num(c.mag_heading),
     route: c.route ?? null,
+    routeOrigin: c.route_origin ?? null,
+    routeDestination: c.route_destination ?? null,
     routeSource: c.route_source ?? null,
     squawk: c.squawk ?? null,
     emergency: c.emergency ?? null,
