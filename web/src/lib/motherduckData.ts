@@ -25,6 +25,17 @@ import type {
 } from "./bundle";
 
 type Row = Record<string, unknown>;
+
+/** Shape of the collector's `GET /live/status`. */
+interface LiveStatusResponse {
+  status: string;
+  sections: Record<string, number>;
+  reference: Record<string, number>;
+  updatedAt: Record<string, string>;
+  ageSeconds: Record<string, number | null>;
+  maxAgeSeconds: number;
+  totals: Record<string, number>;
+}
 const str = (v: unknown, fallback = ""): string => (v === null || v === undefined ? fallback : String(v));
 const num = (v: unknown, fallback = 0): number => {
   const n = typeof v === "number" ? v : Number(v);
@@ -244,16 +255,23 @@ export async function fetchOps(): Promise<Ops> {
   } catch {
     /* ops reports unavailable */
   }
+
+  // Live collector health comes from /live/status, whose shape is per-section
+  // counts + ages (not the legacy stream_health counters).
   let stream_health: Ops["stream_health"] = [];
-  try {
-    const snap = await tryLiveApi<LiveSnapshot>("/live/status", 5000);
-    if (snap && typeof snap === "object") {
-      stream_health = Object.entries(((snap as unknown) as Record<string, unknown>).sections ?? {}).map(
-        ([source, v]) => ({ source, ...(v as Record<string, unknown>) })
-      );
-    }
-  } catch {
-    /* live status unavailable */
+  const status = await tryLiveApi<LiveStatusResponse>("/live/status", 5000);
+  if (status?.sections) {
+    const maxAge = status.maxAgeSeconds ?? 120;
+    stream_health = Object.entries(status.sections).map(([source, records]) => {
+      const age = status.ageSeconds?.[source];
+      return {
+        source,
+        is_healthy: age === null || age === undefined ? false : age <= maxAge,
+        total_records: records,
+        last_success: status.updatedAt?.[source] ?? null,
+        age_seconds: age ?? null,
+      };
+    });
   }
   return { stream_health, pipeline, quality };
 }

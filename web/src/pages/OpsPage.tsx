@@ -130,7 +130,8 @@ export function OpsPage() {
       <Panel>
         <div className="mb-3 flex items-center gap-2">
           <Wifi className="h-4 w-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold text-zinc-200">Real-time stream health</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">Collector stream health</h2>
+          <span className="hud-label ml-auto">live via /live/status</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -138,10 +139,8 @@ export function OpsPage() {
               <tr className="border-b border-white/5">
                 <th className="py-2 pr-4 font-medium">Source</th>
                 <th className="py-2 pr-4 font-medium">Status</th>
-                <th className="py-2 pr-4 text-right font-medium">Fetches</th>
                 <th className="py-2 pr-4 text-right font-medium">Records</th>
-                <th className="py-2 pr-4 text-right font-medium">Errors</th>
-                <th className="py-2 text-right font-medium">Last success</th>
+                <th className="py-2 text-right font-medium">Last update</th>
               </tr>
             </thead>
             <tbody className="mono">
@@ -152,22 +151,22 @@ export function OpsPage() {
                     <span
                       className={cn(
                         "rounded-full px-2 py-px text-[10px]",
-                        s.is_healthy ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"
+                        s.is_healthy ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"
                       )}
                     >
-                      {s.is_healthy ? "healthy" : "degraded"}
+                      {s.is_healthy ? "fresh" : "stale"}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-4 text-right text-zinc-300">{nf(s.total_fetches ?? 0)}</td>
                   <td className="py-1.5 pr-4 text-right text-zinc-300">{nf(s.total_records ?? 0)}</td>
-                  <td className="py-1.5 pr-4 text-right text-zinc-400">{nf(s.error_count ?? 0)}</td>
-                  <td className="py-1.5 text-right text-zinc-500">{relative(s.last_success as string)}</td>
+                  <td className="py-1.5 text-right text-zinc-500">
+                    {s.last_success ? relative(String(s.last_success)) : "—"}
+                  </td>
                 </tr>
               ))}
               {!ops.stream_health.length && (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-zinc-600">
-                    No stream health recorded.
+                  <td colSpan={4} className="py-4 text-center text-zinc-600">
+                    Collector not reachable — no stream health.
                   </td>
                 </tr>
               )}

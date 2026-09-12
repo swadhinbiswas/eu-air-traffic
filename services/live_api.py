@@ -91,25 +91,49 @@ def create_app(store: LiveStore, app_settings: Settings | None = None) -> FastAP
 
     @app.get("/live/taf")
     def taf(ids: str = Query(default="")) -> dict[str, Any]:
+        """TAF rows in the dashboard's camelCase contract."""
         data = _snapshot()
         wanted = {i.strip().upper() for i in ids.split(",") if i.strip()}
         rows = data["weather"]["taf"]
         if wanted:
             rows = [r for r in rows if str(r.get("station_icao", "")).upper() in wanted]
-        return {"source": "vps", "generatedAt": data["generatedAt"], "taf": rows}
+        return {
+            "source": "vps",
+            "generatedAt": data["generatedAt"],
+            "taf": [
+                {
+                    "icao": r.get("station_icao"),
+                    "issueTime": r.get("issue_time"),
+                    "validFrom": r.get("valid_from"),
+                    "validTo": r.get("valid_to"),
+                    "rawTAF": r.get("raw_taf"),
+                }
+                for r in rows
+            ],
+        }
 
     @app.get("/live/aircraft/{hex}")
     def aircraft(hex: str) -> dict[str, Any]:
+        """Enrichment for one airframe from its live position row."""
         target = hex.upper()
         for position in store.section("positions"):
-            if str(position.get("icao24", "")).upper() == target:
-                return {
-                    "icao24": target,
-                    "found": True,
-                    "registration": position.get("registration"),
-                    "type": position.get("aircraft_type"),
-                    "operator": None,
-                }
+            if str(position.get("icao24", "")).upper() != target:
+                continue
+            return {
+                "icao24": target,
+                "found": True,
+                "registration": position.get("registration"),
+                "type": position.get("aircraft_type"),
+                "typeName": position.get("type_name"),
+                "manufacturer": position.get("manufacturer"),
+                "operator": position.get("operator_name"),
+                "operatorCountry": position.get("operator_country"),
+                "aircraftClass": position.get("aircraft_class"),
+                "emitterClass": position.get("emitter_class"),
+                "wakeCategory": position.get("wake_category"),
+                "route": position.get("route"),
+                "co2KgPerHour": position.get("co2_kg_per_hour"),
+            }
         return {"icao24": target, "found": False}
 
     @app.get("/live/emissions")

@@ -59,6 +59,19 @@ def _store() -> LiveStore:
         ],
         "station_icao",
     )
+    store.update(
+        "taf",
+        [
+            {
+                "station_icao": "EDDF",
+                "issue_time": "2026-01-01T00:00:00.000Z",
+                "valid_from": 1767225600,
+                "valid_to": 1767312000,
+                "raw_taf": "TAF EDDF 010000Z ...",
+            }
+        ],
+        "station_icao",
+    )
     return store
 
 
@@ -326,3 +339,22 @@ def test_positions_429_parks_circle_in_cooldown() -> None:
     session.get_calls = 0
     assert len(src.fetch()) == 1  # circles skipped, opensky only
     assert session.get_calls == 1
+
+
+def test_taf_endpoint_returns_camel_case_contract() -> None:
+    app = create_app(_store())
+    client = TestClient(app)
+    taf = client.get("/live/taf?ids=EDDF").json()["taf"]
+    assert taf and taf[0]["icao"] == "EDDF"
+    assert taf[0]["rawTAF"].startswith("TAF EDDF")
+    assert "issueTime" in taf[0] and "raw_taf" not in taf[0]
+
+
+def test_aircraft_endpoint_enriches_from_position() -> None:
+    app = create_app(_store())
+    client = TestClient(app)
+    body = client.get("/live/aircraft/ABC123").json()
+    assert body["found"] is True
+    assert body["operator"] == "Lufthansa"  # resolved from the DLH callsign
+    assert body["type"] == "A320"
+    assert body["aircraftClass"] == "passenger"
