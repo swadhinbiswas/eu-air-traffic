@@ -3,14 +3,14 @@ name: Frontend (runtime data)
 # The dashboard fetches its data at runtime (warehouse API on MotherDuck + the
 # collector's live feed), so there is no static data bundle to generate. This
 # job only builds and publishes the React app.
+# Runs on every push to main alongside the lake pipeline, plus nightly so the
+# deployed bundle always reflects the current secrets/variables.
 on:
   schedule:
     - cron: "30 3 * * *" # nightly rebuild
-  workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "web/**"
+  workflow_dispatch:
 
 concurrency:
   group: frontend

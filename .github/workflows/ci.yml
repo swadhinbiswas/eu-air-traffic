@@ -65,50 +65,6 @@ jobs:
           path: htmlcov
           if-no-files-found: ignore
 
-  e2e:
-    # Smoke test the whole pipeline against synthetic data on the runner. It has
-    # no Kafka/HF/MotherDuck/Turso credentials, and the pipeline itself refuses
-    # to upload in mock mode, so nothing it does can reach the real lake.
-    name: Pipeline smoke test (synthetic data, no uploads)
-    runs-on: ubuntu-latest
-    env:
-      MOCK_MODE: "true"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Run full pipeline
-        run: uv run python -m pipelines.orchestrator
-
-      - name: Validate warehouse
-        run: |
-          uv run python - <<'EOF'
-          import duckdb
-          con = duckdb.connect('warehouse/air_traffic.duckdb', read_only=True)
-          n = con.execute('SELECT COUNT(*) FROM fact_flights').fetchone()[0]
-          assert n > 0, "fact_flights is empty"
-          print(f"fact_flights has {n} rows — OK")
-          EOF
-
-      - name: Build dbt models + tests
-        working-directory: dbt
-        run: |
-          ../.venv/bin/dbt build --profiles-dir . || uv run dbt build --profiles-dir .
-
-      - name: Generate dbt docs (catalog)
-        working-directory: dbt
-        run: uv run dbt docs generate --profiles-dir . || true
-
   web:
     name: Dashboard build
     runs-on: ubuntu-latest

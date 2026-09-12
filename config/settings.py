@@ -240,6 +240,13 @@ class Settings(BaseSettings):
     def _normalise_environment(cls, value: str) -> str:
         return value.strip().lower()
 
+    @field_validator("huggingface_repo", mode="before")
+    @classmethod
+    def _strip_huggingface_repo(cls, value: object) -> object:
+        # A single trailing space in the GitHub variable made create_repo reject
+        # the id and every upload fail, while the step still reported success.
+        return value.strip() if isinstance(value, str) else value
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalise_log_level(cls, value: str) -> str:

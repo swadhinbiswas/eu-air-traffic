@@ -1,0 +1,3 @@
+# Single-page app: every client-side route falls back to index.html, otherwise
+# a deep link like /map 404s on a static host.
+/*    /index.html   200
