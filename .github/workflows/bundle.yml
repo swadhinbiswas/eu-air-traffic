@@ -50,3 +50,14 @@ jobs:
           name: web-dashboard
           path: web/dist
           if-no-files-found: error
+
+      # Cloudflare's own Git integration is not rebuilding this project, so the
+      # proven build is deployed from here. Needs two repository secrets:
+      #   CLOUDFLARE_API_TOKEN   (Account → Cloudflare Pages → Edit)
+      #   CLOUDFLARE_ACCOUNT_ID  (Pages project overview, right sidebar)
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/dist --project-name=airtraffic-eu --branch=main
