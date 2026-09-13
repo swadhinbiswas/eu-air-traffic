@@ -23,14 +23,17 @@ models:
       - name: departure_icao
         description: "Departure airport ICAO code (null when only the arrival end is known)"
         tests:
+          # OpenSky /flights/all and AirLabs schedules include long-haul
+          # endpoints (K/J/O... prefixes) that dim_airport deliberately does
+          # not cover. Only European endpoints are expected to resolve —
+          # everything else is out of scope, not broken data.
           - relationships:
               arguments:
                 to: ref('stg_dim_airport')
                 field: airport_icao
-              # OpenSky/AirLabs can carry a non-EU endpoint; dim_airport is the
-              # EU reference, so an outside airport is a warning, not a failure.
               config:
                 severity: warn
+                where: "left(coalesce(departure_icao, ''), 1) in ('E', 'L', 'B')"
       - name: arrival_icao
         description: "Arrival airport ICAO code (null when only the departure end is known)"
         tests:
@@ -40,6 +43,8 @@ models:
                 field: airport_icao
               config:
                 severity: warn
+                where: "left(coalesce(arrival_icao, ''), 1) in ('E', 'L', 'B')"
+
       - name: status
         description: "Flight status"
         tests:
