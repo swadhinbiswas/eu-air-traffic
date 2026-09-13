@@ -6,7 +6,7 @@ name: Lake (Kafka → Silver → Gold)
 # → MotherDuck → Turso.
 on:
   schedule:
-    - cron: "*/9 * * * *" # every 9 minutes
+    - cron: "*/15 * * * *" # every 15 minutes (queue-friendly, still fresh)
   push:
     branches: [main]
     # Frontend-only pushes deploy through Cloudflare; they must not queue a
