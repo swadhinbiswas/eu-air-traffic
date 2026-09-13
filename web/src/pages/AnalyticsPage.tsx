@@ -541,8 +541,8 @@ function OfficialTrafficPanel() {
       />
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Airports cross-checked" value={nf(matched.length, 0)} tone="emerald" />
-        <StatCard label="Official pax · 12m" value={`${nf(totalPax / 1_000_000, 1)}M`} tone="sky" />
-        <StatCard label="Observed flights" value={nf(totalFlights, 0)} tone="cyan" />
+        <StatCard label="Official pax · 12m" value={`${nf(totalPax / 1_000_000, 1)}M`} tone="cyan" />
+        <StatCard label="Observed flights" value={nf(totalFlights, 0)} tone="default" />
         <StatCard label="Exact rank match" value={pct(exactRanks / Math.max(matched.length, 1), 0)} tone="amber" />
       </div>
       <div className="overflow-x-auto">
