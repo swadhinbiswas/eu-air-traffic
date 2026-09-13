@@ -51,6 +51,10 @@ stream = [
 turso = [
     "libsql-client>=0.3.1",
 ]
+# Build-time only: regenerates services/data/emission_openap.json.
+openap = [
+    "openap>=2.6.1",
+]
 
 [project.scripts]
 air-traffic-orchestrate = "pipelines.orchestrator:main"
