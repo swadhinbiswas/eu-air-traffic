@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: eurostat
+    description: "Official Eurostat statistics fetched monthly by GitHub Actions"
+    schema: main
+    tables:
+      - name: eurostat_airport_traffic
+        description: "Monthly passengers per EU airport (avia_paoa, ~2 month lag)"

@@ -17,6 +17,7 @@ dbt views under the ``gold_`` prefix for downstream consumers.
 from __future__ import annotations
 
 import datetime as _dt
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -160,6 +161,16 @@ _EMPTY_DIM_ROUTE = {
 # and never more than this many rows (uploaded to Turso every run).
 LIVE_POSITION_WINDOW_HOURS = 1
 LIVE_POSITION_MAX_ROWS = 5_000
+
+# Eurostat official monthly passengers per airport (benchmark layer).
+_EUROSTAT_TRAFFIC_COLUMNS = ("period", "airport_icao", "passengers", "source", "fetched_at")
+_EMPTY_EUROSTAT_TRAFFIC = {
+    "period": "VARCHAR",
+    "airport_icao": "VARCHAR",
+    "passengers": "BIGINT",
+    "source": "VARCHAR",
+    "fetched_at": "VARCHAR",
+}
 
 _FACT_POSITIONS_COLUMNS = (
     "icao24",
@@ -416,6 +427,21 @@ class WarehouseBuilder:
         self._load_replace("weather", weather)
         logger.info("[warehouse] weather rows=%s", weather.height)
 
+    def build_eurostat_traffic(self) -> None:
+        """Official Eurostat monthly passengers per airport (if fetched)."""
+        path = (
+            Path(self.settings.project_root)
+            / "services"
+            / "data"
+            / "eurostat_airport_traffic.parquet"
+        )
+        if not path.exists():
+            self._create_or_replace_empty("eurostat_airport_traffic", _EMPTY_EUROSTAT_TRAFFIC)
+            return
+        frame = _ensure_columns(pl.read_parquet(path), _EUROSTAT_TRAFFIC_COLUMNS)
+        self._load_replace("eurostat_airport_traffic", frame)
+        logger.info("[warehouse] eurostat_airport_traffic rows=%s", frame.height)
+
     def build_fact_positions(self) -> None:
         """Latest live aircraft position per airframe (with class + CO₂).
 
@@ -525,6 +551,7 @@ class WarehouseBuilder:
         self.build_fact_flights()
         self.build_weather()
         self.build_fact_positions()
+        self.build_eurostat_traffic()
         self.build_fact_emissions()
         self.build_fact_notams()
 
