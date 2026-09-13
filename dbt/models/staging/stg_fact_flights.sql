@@ -22,7 +22,10 @@ renamed as (
         delay_minutes,
         coalesce(cancelled, false) as cancelled,
         source as data_source,
-        ingestion_date
+        -- Live rows arrive without ingestion_date; derive it from collected_at
+        -- so the freshness report has a value for every layer.
+        coalesce(ingestion_date, substr(cast(collected_at as varchar), 1, 10)) as ingestion_date,
+        collected_at
     from source
     where flight_id is not null
 )

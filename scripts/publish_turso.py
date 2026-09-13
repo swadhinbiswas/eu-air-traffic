@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import argparse
 import base64
-import math
+import hashlib
 import json
+import math
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -55,11 +57,22 @@ STATIC_TABLES = (
 )
 # Growing tables: upserted incrementally. table → (primary key, watermark column)
 GROWING_TABLES: dict[str, tuple[tuple[str, ...], str]] = {
-    "fact_flights": (("flight_id",), "actual_arrival"),
+    # collected_at, not actual_arrival: en-route and cancelled flights have no
+    # arrival, and arrivals are backfilled with older timestamps.
+    "fact_flights": (("flight_id",), "collected_at"),
     "weather": (("station_icao", "timestamp"), "timestamp"),
 }
 BATCH_SIZE = 400
 MAX_ROWS_PER_SYNC = 250_000
+# Static tables upload only when their content hash changes. Positions move
+# every cycle, so their refresh is capped to protect the free write budget.
+STATIC_REFRESH_SECONDS: dict[str, int] = {"fact_positions": 900}
+# When a growing table is recreated after a schema change it must be re-seeded;
+# the old watermark points past rows that no longer exist.
+GROWING_RESET_LOOKBACK_MS: dict[str, int] = {
+    "fact_flights": 7 * 24 * 3_600_000,
+    "weather": 24 * 3_600_000,
+}
 
 
 def _sqlite_type(duck_type: str) -> str:
@@ -251,14 +264,24 @@ class TursoPublisher:
         except Exception:  # noqa: BLE001 - table does not exist yet
             return []
 
-    def _ensure_table(self, table: str, columns: list[tuple[str, str]], replace: bool) -> None:
+    def _ensure_table(self, table: str, columns: list[tuple[str, str]], replace: bool) -> bool:
+        """Returns True only when an existing table was recreated (schema change).
+
+        A brand-new table must keep the caller's initial watermark; recreating
+        one with data in it invalidates the stored watermark.
+        """
         wanted = [c for c, _ in columns]
         existing = self._sqlite_columns(table)
         if existing and (replace or existing != wanted):
             self.remote.execute(f'DROP TABLE IF EXISTS "{table}"')
-            existing = []
+            self._create_table(table, columns)
+            return True
         if existing:
-            return
+            return False
+        self._create_table(table, columns)
+        return False
+
+    def _create_table(self, table: str, columns: list[tuple[str, str]]) -> None:
         defs = ", ".join(f'"{c}" {_sqlite_type(t)}' for c, t in columns)
         primary = GROWING_TABLES.get(table, ((), ""))[0]
         if primary:
@@ -266,7 +289,7 @@ class TursoPublisher:
         self.remote.execute(f'CREATE TABLE "{table}" ({defs})')
 
     # ── state ──────────────────────────────────────────────────────────────
-    def _watermark(self, table: str) -> str:
+    def _state_get(self, table: str) -> str:
         try:
             rows = self.remote.execute(
                 "SELECT watermark FROM _sync_state WHERE table_name = ?", [table]
@@ -275,11 +298,34 @@ class TursoPublisher:
         except Exception:  # noqa: BLE001 - created lazily by the caller
             return ""
 
-    def _set_watermark(self, table: str, watermark: str) -> None:
+    def _state_set(self, table: str, value: str) -> None:
         self.remote.execute(
             "INSERT OR REPLACE INTO _sync_state (table_name, watermark) VALUES (?, ?)",
-            [table, watermark],
+            [table, value],
         )
+
+    def _watermark(self, table: str) -> str:
+        value = self._state_get(table)
+        if value.startswith("wm:"):
+            return value[3:]
+        # Legacy rows stored a bare epoch; anything else is unusable.
+        return value if value.isdigit() else "0"
+
+    def _set_watermark(self, table: str, watermark: str) -> None:
+        self._state_set(table, f"wm:{watermark}")
+
+    def _static_state(self, table: str) -> tuple[str, int]:
+        """Return (content hash, last upload epoch ms) for a static table."""
+        value = self._state_get(table)
+        if not value.startswith("static:"):
+            return "", 0
+        parts = value.split(":", 2)
+        if len(parts) != 3:
+            return "", 0
+        try:
+            return parts[2], int(parts[1])
+        except ValueError:
+            return "", 0
 
     # ── writes ─────────────────────────────────────────────────────────────
     def _write_rows(self, table: str, columns: list[str], rows: list[tuple[Any, ...]]) -> int:
@@ -295,20 +341,51 @@ class TursoPublisher:
             written += len(chunk)
         return written
 
+    def _replace_table(
+        self,
+        table: str,
+        columns: list[tuple[str, str]],
+        names: list[str],
+        rows: list[tuple[Any, ...]],
+    ) -> None:
+        """Load a shadow table and swap it in, so readers never see it empty."""
+        shadow, previous = f"{table}__new", f"{table}__old"
+        defs = ", ".join(f'"{c}" {_sqlite_type(t)}' for c, t in columns)
+        self.remote.execute(f'DROP TABLE IF EXISTS "{shadow}"')
+        self.remote.execute(f'CREATE TABLE "{shadow}" ({defs})')
+        self._write_rows(shadow, names, rows)
+        had_table = bool(self._sqlite_columns(table))
+        self.remote.execute(f'DROP TABLE IF EXISTS "{previous}"')
+        if had_table:
+            self.remote.execute(f'ALTER TABLE "{table}" RENAME TO "{previous}"')
+        self.remote.execute(f'ALTER TABLE "{shadow}" RENAME TO "{table}"')
+        self.remote.execute(f'DROP TABLE IF EXISTS "{previous}"')
+
     def _sync_static(self, table: str) -> int:
         columns = self._columns(table)
         if not columns:
             logger.warning("[turso] local table %s missing — skipped", table)
             return 0
-        self._ensure_table(table, columns, replace=False)
         names = [c for c, _ in columns]
         select = ", ".join(f'"{c}"' for c in names)
         raw = self.local.execute(f'SELECT {select} FROM "{table}"').fetchall()  # type: ignore[union-attr]
-        # The current table is replaced, not merged.
-        self.remote.execute(f'DELETE FROM "{table}"')
         rows = [tuple(_value(v) for v in record) for record in raw]
-        written = self._write_rows(table, names, rows)
-        return written
+        digest = hashlib.sha256(
+            json.dumps(rows, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+        previous_digest, last_sync_ms = self._static_state(table)
+        if previous_digest == digest:
+            # Identical content: no delete, no insert, no write cost.
+            return 0
+        now_ms = int(time.time() * 1000)
+        refresh_ms = STATIC_REFRESH_SECONDS.get(table, 0) * 1000
+        if refresh_ms and now_ms - last_sync_ms < refresh_ms:
+            # Changed, but this table has a refresh floor (positions move every
+            # cycle; re-publishing them every run wastes the write budget).
+            return 0
+        self._replace_table(table, columns, names, rows)
+        self._state_set(table, f"static:{now_ms}:{digest}")
+        return len(rows)
 
     def _sync_growing(self, table: str) -> int:
         primary, watermark_column = GROWING_TABLES[table]
@@ -317,17 +394,25 @@ class TursoPublisher:
         if not columns:
             logger.warning("[turso] local table %s missing — skipped", table)
             return 0
-        self._ensure_table(table, columns, replace=False)
+        recreated = self._ensure_table(table, columns, replace=False)
+        if recreated:
+            # The old watermark points past rows that no longer exist; re-seed
+            # a recent window instead of leaving the serving copy empty.
+            lookback = GROWING_RESET_LOOKBACK_MS.get(table, 24 * 3_600_000)
+            self._set_watermark(table, str(int(time.time() * 1000) - lookback))
+            logger.warning("[turso] %s was recreated — re-seeding recent rows", table)
         names = [c for c, _ in columns]
         select = ", ".join(f'"{c}"' for c in names)
 
         # Watermarks are epoch milliseconds: absolute, so no timezone or
-        # string-format comparison pitfalls.
+        # string-format comparison pitfalls. Strict ">" — a correction to an
+        # existing flight is re-sent under a newer collected_at, so the same
+        # flight_id simply upserts.
         watermark = self._watermark(table) or "0"
         raw = self.local.execute(  # type: ignore[union-attr]
             f'SELECT {select} FROM "{table}" '
             f'WHERE "{watermark_column}" IS NOT NULL '
-            f'AND epoch_ms("{watermark_column}") > CAST(? AS BIGINT) '
+            f'AND epoch_ms(CAST("{watermark_column}" AS TIMESTAMPTZ)) > CAST(? AS BIGINT) '
             f'ORDER BY "{watermark_column}" LIMIT {MAX_ROWS_PER_SYNC}',
             [watermark],
         ).fetchall()
