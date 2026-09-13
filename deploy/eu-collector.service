@@ -10,6 +10,8 @@ User=airtraffic
 Group=airtraffic
 WorkingDirectory=/opt/eu-air-traffic
 EnvironmentFile=/opt/eu-air-traffic/.env
+# Bypass-plain-HTTP access: Caddy on the same host proxies TLS.
+Environment=LIVE_API_HOST=127.0.0.1
 ExecStart=/opt/eu-air-traffic/.venv/bin/python -m services.collector
 Restart=always
 RestartSec=5

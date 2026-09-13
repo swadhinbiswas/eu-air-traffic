@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   loadBundle,
   type Airport,
@@ -20,6 +20,7 @@ function useRuntimeData<T>(file: string, refreshMs = 60_000) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const dataRef = useRef<T | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -28,11 +29,14 @@ function useRuntimeData<T>(file: string, refreshMs = 60_000) {
       try {
         const d = await loadBundle<T>(file);
         if (alive) {
+          dataRef.current = d;
           setData(d);
           setError(null);
         }
       } catch (e: unknown) {
-        if (alive) setError(e instanceof Error ? e.message : "Load failed");
+        // A transient refresh failure must not blank a page that already has
+        // data; keep the stale frame and retry on the next tick.
+        if (alive && !dataRef.current) setError(e instanceof Error ? e.message : "Load failed");
       } finally {
         if (alive) setLoading(false);
       }
