@@ -9,6 +9,11 @@ on:
     - cron: "*/9 * * * *" # every 9 minutes
   push:
     branches: [main]
+    # Frontend-only pushes deploy through Cloudflare; they must not queue a
+    # Kafka drain behind the single-writer concurrency group.
+    paths-ignore:
+      - "web/**"
+      - "README.md"
   workflow_dispatch:
 
 concurrency:
