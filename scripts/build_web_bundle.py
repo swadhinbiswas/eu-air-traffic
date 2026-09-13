@@ -336,7 +336,9 @@ def build_payloads(
         windiest = max(weather, key=lambda w: float(w.get("wind_speed_ms") or 0))
         warmest = max(
             weather,
-            key=lambda w: float(w["temperature_c"]) if w.get("temperature_c") is not None else -99.0,
+            key=lambda w: (
+                float(w["temperature_c"]) if w.get("temperature_c") is not None else -99.0
+            ),
         )
         stories.append(
             {
