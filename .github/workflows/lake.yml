@@ -72,13 +72,14 @@ jobs:
           fi
 
       - name: Pull existing Silver from Hugging Face
-        # Incremental Silver appends to the previous layer, so it must be present.
+        # Incremental Silver appends to the previous layer, so it must be
+        # present: a failed pull followed by a push would truncate the lake.
         run: uv run python -m scripts.lake_sync pull-silver
-        continue-on-error: true
 
       - name: Sink Kafka → Bronze Parquet
+        # Exits non-zero when the broker is unreachable or nothing is drained,
+        # which is a real failure, not a quiet window.
         run: uv run python -m services.sink --window-seconds 420
-        continue-on-error: true
 
       - name: Silver transform (incremental)
         run: uv run python -m pipelines.silver

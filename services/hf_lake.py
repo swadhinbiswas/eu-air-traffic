@@ -115,6 +115,8 @@ def download_prefix(
             token=cfg.huggingface_token,
         )
     except Exception as exc:  # noqa: BLE001
+        # Never silently continue: the caller merges with local state and
+        # pushes the result back, so a failed pull can truncate the lake.
         logger.error("[hf] download %s failed: %s", repo_prefix, exc)
-        return 0
+        raise RuntimeError(f"download {repo_prefix} failed: {exc}") from exc
     return len([p for p in root.rglob("*") if p.is_file()])
