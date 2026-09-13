@@ -6,10 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 
 def _forecast_payload() -> dict:
+    # Times must be relative to now: _rows_for drops hours more than 1h old.
+    base = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    stamps = [(base + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(3)]
     return {
-        "current": {"time": "2026-09-13T10:00", "temperature_2m": 20.0, "weather_code": 1},
+        "current": {"time": stamps[0], "temperature_2m": 20.0, "weather_code": 1},
         "hourly": {
-            "time": ["2026-09-13T10:00", "2026-09-13T11:00", "2026-09-13T12:00"],
+            "time": stamps,
             "temperature_2m": [20.0, 21.0, 22.0],
             "precipitation": [0.0, 0.0, 0.0],
             "wind_speed_10m": [3.0, 4.0, 5.0],
