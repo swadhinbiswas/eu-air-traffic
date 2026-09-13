@@ -266,10 +266,13 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001 - keep the loop alive
                 logger.error("[sink] cycle failed: %s", exc)
     counts = sink.run(max_seconds=args.max_seconds, window_seconds=args.window_seconds)
-    if not counts:
-        logger.warning("[sink] no records written")
+    if sink._consumer is None:
+        # connect() failed: the broker was unreachable.
+        logger.error("[sink] Kafka unavailable — drain failed")
         return 1
-    logger.info("[sink] written: %s", counts)
+    # An empty window is normal (positions publish every 5 minutes, this can be
+    # a 30-second idle poll); it must not fail the lake job.
+    logger.info("[sink] drained: %s", counts or "nothing new")
     return 0
 
 
