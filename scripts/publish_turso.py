@@ -64,6 +64,8 @@ GROWING_TABLES: dict[str, tuple[tuple[str, ...], str]] = {
     "weather": (("station_icao", "timestamp"), "timestamp"),
 }
 BATCH_SIZE = 400
+# Rows per INSERT statement (400 separate statements were the bottleneck).
+MULTI_ROW_STATEMENT_ROWS = 100
 MAX_ROWS_PER_SYNC = 20_000
 # Static tables upload only when their content hash changes. Positions move
 # every cycle, so their refresh is capped to protect the free write budget.
@@ -334,13 +336,26 @@ class TursoPublisher:
     def _write_rows(self, table: str, columns: list[str], rows: list[tuple[Any, ...]]) -> int:
         if not rows:
             return 0
-        placeholders = ", ".join("?" for _ in columns)
         column_list = ", ".join(f'"{c}"' for c in columns)
-        sql = f'INSERT OR REPLACE INTO "{table}" ({column_list}) VALUES ({placeholders})'
+        row_placeholder = "(" + ", ".join("?" for _ in columns) + ")"
         written = 0
         for start in range(0, len(rows), BATCH_SIZE):
             chunk = rows[start : start + BATCH_SIZE]
-            self.remote.batch([(sql, list(row)) for row in chunk])  # type: ignore[union-attr]
+            # One multi-row INSERT per statement instead of one per row: Turso
+            # parses far fewer statements, which is what made bulk syncs slow.
+            # Statements stay modest (request-size safety) and still travel as
+            # one pipeline request per chunk.
+            statements = []
+            for index in range(0, len(chunk), MULTI_ROW_STATEMENT_ROWS):
+                group = chunk[index : index + MULTI_ROW_STATEMENT_ROWS]
+                values = ", ".join(row_placeholder for _ in group)
+                statements.append(
+                    (
+                        f'INSERT OR REPLACE INTO "{table}" ({column_list}) VALUES {values}',
+                        [value for row in group for value in row],
+                    )
+                )
+            self.remote.batch(statements)  # type: ignore[union-attr]
             written += len(chunk)
         return written
 
