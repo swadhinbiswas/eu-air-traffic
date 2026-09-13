@@ -45,21 +45,41 @@ def ensure_repo(app_settings: Settings | None = None) -> bool:
 def upload_file(
     local_path: str | Path, repo_path: str, app_settings: Settings | None = None
 ) -> bool:
-    """Upload one file to the dataset repo."""
+    """Upload one file to the dataset repo.
+
+    An unchanged file is a no-op on Hugging Face (it answers 200 without
+    creating a commit), and some hub versions surface that as an error. Confirm
+    against the remote size before calling it a failure.
+    """
     if not hf_enabled(app_settings):
         return False
     api, cfg = _api(app_settings)
+    last_error: Exception | None = None
+    for _ in range(2):  # one retry for transient network errors
+        try:
+            api.upload_file(
+                path_or_fileobj=str(local_path),
+                path_in_repo=repo_path,
+                repo_id=cfg.huggingface_repo,
+                repo_type="dataset",
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
     try:
-        api.upload_file(
-            path_or_fileobj=str(local_path),
-            path_in_repo=repo_path,
-            repo_id=cfg.huggingface_repo,
-            repo_type="dataset",
+        from huggingface_hub import get_hf_file_metadata, hf_hub_url
+
+        metadata = get_hf_file_metadata(
+            hf_hub_url(cfg.huggingface_repo, repo_path, repo_type="dataset"),
+            token=cfg.huggingface_token,
         )
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[hf] upload %s failed: %s", repo_path, exc)
-        return False
+        if metadata.size == Path(local_path).stat().st_size:
+            logger.info("[hf] %s already up to date", repo_path)
+            return True
+    except Exception:  # noqa: BLE001 - fall through to the real error
+        pass
+    logger.error("[hf] upload %s failed: %s", repo_path, last_error)
+    return False
 
 
 def upload_directory(
