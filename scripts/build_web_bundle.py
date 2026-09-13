@@ -336,7 +336,7 @@ def build_payloads(
         windiest = max(weather, key=lambda w: float(w.get("wind_speed_ms") or 0))
         warmest = max(
             weather,
-            key=lambda w: float(w["temperature_c"]) if w.get("temperature_c") is not None else -99,
+            key=lambda w: float(w["temperature_c"]) if w.get("temperature_c") is not None else -99.0,
         )
         stories.append(
             {
@@ -772,7 +772,7 @@ def _build_stories(
         "FROM gold_seasonal_trends GROUP BY hour_of_day ORDER BY hour_of_day",
     )
     if hourly:
-        peak = max(hourly, key=lambda r: r["flight_count"])
+        peak = max(hourly, key=lambda r: r["flight_count"] or 0)
         stories.append(
             {
                 "id": "peak-hour",
@@ -799,7 +799,7 @@ def _build_stories(
         "GROUP BY 1,2,3 ORDER BY total_flights DESC, distance_km DESC",
     )
     if routes:
-        longest = max(routes, key=lambda r: r["distance_km"])
+        longest = max(routes, key=lambda r: r["distance_km"] or 0)
         stories.append(
             {
                 "id": "network-reach",
