@@ -273,6 +273,31 @@ def _europe_codes() -> tuple[set[str], dict[str, str]]:
     return icao, iata_to_icao
 
 
+def _europe_points() -> dict[str, tuple[float, float]]:
+    """ICAO → (lat, lon) for the EU airport reference."""
+    try:
+        rows = json.loads(EU_AIRPORTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    points: dict[str, tuple[float, float]] = {}
+    for row in rows:
+        icao = str(row.get("icao") or "").upper()
+        lat, lon = row.get("latitude"), row.get("longitude")
+        if icao and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            points.setdefault(icao, (float(lat), float(lon)))
+    return points
+
+
+def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    lat1, lon1 = radians(a[0]), radians(a[1])
+    lat2, lon2 = radians(b[0]), radians(b[1])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 2 * asin(sqrt(h)) * 6371.0
+
+
 def _fleet_specs() -> dict[str, dict[str, object]]:
     """Capacity/range specs from the curated fleet table (best effort)."""
     from ingestion.aircraft.collector import AIRCRAFT_TYPES
@@ -321,6 +346,7 @@ def build_routes() -> int:
     to ICAO so the route network joins cleanly to ``dim_airport``.
     """
     europe_icao, iata_to_icao = _europe_codes()
+    points = _europe_points()
     raw = _fetch_bytes(ROUTES_URL).decode("utf-8", errors="replace")
     reader = csv.reader(io.StringIO(raw))
     out: list[dict[str, object]] = []
@@ -333,6 +359,12 @@ def build_routes() -> int:
         if origin not in europe_icao and dest not in europe_icao:
             continue
         stops = row[7].strip()
+        origin_point, dest_point = points.get(origin), points.get(dest)
+        distance = (
+            round(_haversine_km(origin_point, dest_point), 1)
+            if origin_point and dest_point
+            else None
+        )
         out.append(
             {
                 "airline": airline,
@@ -340,6 +372,7 @@ def build_routes() -> int:
                 "destination": dest,
                 "stops": int(stops) if stops.isdigit() else 0,
                 "equipment": row[8].strip(),
+                "distance_km": distance,
             }
         )
     DATA_DIR.mkdir(parents=True, exist_ok=True)

@@ -91,19 +91,24 @@ class RouteCollector(Collector):
 
         # Cache miss: fetch once from OpenFlights.
         try:
+            from ingestion import reference
+
+            known_icao = set(reference.airport_coordinates())
+            iata_codes = reference.iata_to_icao()
             data = self._fetch_remote(self.OPENFLIGHTS_ROUTES_URL)
             for line in data.strip().split("\n"):
                 try:
                     parts = line.split(",")
                     if len(parts) >= 8:
                         airline = parts[0].strip('"')
-                        origin = parts[2].strip('"')
-                        dest = parts[4].strip('"')
+                        # routes.dat endpoints are IATA; the airport index is ICAO.
+                        origin = iata_codes.get(parts[2].strip('"').upper(), parts[2].strip('"'))
+                        dest = iata_codes.get(parts[4].strip('"').upper(), parts[4].strip('"'))
                         stops = parts[5].strip('"')
                         equipment = parts[7].strip('"')
 
                         # Filter for European routes
-                        if origin in EUROPEAN_AIRPORTS or dest in EUROPEAN_AIRPORTS:
+                        if origin in known_icao or dest in known_icao:
                             rows.append(
                                 {
                                     "airline": airline,
@@ -128,23 +133,10 @@ class RouteCollector(Collector):
         return self._mock(rows) if self.settings.mock_mode else rows
 
     def _estimate_distance(self, origin: str, dest: str) -> float | None:
-        """Estimate distance between two airports using haversine formula."""
-        from math import radians, cos, sin, asin, sqrt
+        """Great-circle distance, resolved against the full bundled airport list."""
+        from ingestion import reference
 
-        orig = EUROPEAN_AIRPORTS.get(origin)
-        dst = EUROPEAN_AIRPORTS.get(dest)
-        if not orig or not dst:
-            return None
-
-        lat1, lon1 = radians(float(orig["lat"])), radians(float(orig["lon"]))
-        lat2, lon2 = radians(float(dst["lat"])), radians(float(dst["lon"]))
-
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-        c = 2 * asin(sqrt(a))
-        r = 6371  # Earth radius in km
-        return round(c * r, 1)
+        return reference.route_distance_km(origin, dest)
 
     def _fallback_routes(self) -> list[dict[str, Any]]:
         """Generate synthetic European route network."""

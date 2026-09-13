@@ -27,6 +27,10 @@ models:
               arguments:
                 to: ref('stg_dim_airport')
                 field: airport_icao
+              # OpenSky/AirLabs can carry a non-EU endpoint; dim_airport is the
+              # EU reference, so an outside airport is a warning, not a failure.
+              config:
+                severity: warn
       - name: arrival_icao
         description: "Arrival airport ICAO code (null when only the departure end is known)"
         tests:
@@ -34,6 +38,8 @@ models:
               arguments:
                 to: ref('stg_dim_airport')
                 field: airport_icao
+              config:
+                severity: warn
       - name: status
         description: "Flight status"
         tests:
@@ -41,9 +47,7 @@ models:
               arguments:
                 values: ['landed', 'scheduled', 'cancelled', 'diverted', 'active', 'en-route']
       - name: delay_minutes
-        description: "Flight delay in minutes (capped at 0)"
-        tests:
-          - not_null
+        description: "Delay in minutes; NULL when the source has no schedule (OpenSky)"
       - name: cancelled
         description: "Whether the flight was cancelled"
 

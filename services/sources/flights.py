@@ -146,7 +146,10 @@ class FlightsSource(Source):
                 datetime.fromtimestamp(last_seen, tz=UTC).isoformat() if last_seen else None
             ),
             "status": "landed" if arrival else "en-route",
-            "delay_minutes": 0,
+            # OpenSky has no schedule, so a delay cannot be known. NULL keeps
+            # these rows out of punctuality averages instead of counting them
+            # as perfectly on time (the old 0 made OTP trend to 100%).
+            "delay_minutes": None,
             "source": "opensky",
             "collected_at": collected_at,
         }
