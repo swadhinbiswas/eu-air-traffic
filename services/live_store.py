@@ -15,7 +15,14 @@ from services.enrichment import enrich_position, summarise_airspace
 
 # Sections keyed by their logical source name.
 _POSITION_SECTION = "positions"
+_FLIGHT_SECTION = "flights"
 _REFERENCE_KINDS = ("airport", "route", "aircraft", "emission", "holiday")
+
+# Movements accumulate forever otherwise (OpenSky + AirLabs rows keep distinct
+# ids). The serving view only needs recent history, and unbounded sections are
+# what turn a long-running collector into an OOM and a multi-MB snapshot.
+FLIGHT_MAX_AGE_SECONDS = 12 * 3600.0
+FLIGHT_MAX_ROWS = 20_000
 
 
 def _now() -> datetime:
@@ -89,6 +96,33 @@ class LiveStore:
         with self._lock:
             return list(self._sections.get(name, {}).values())
 
+    def _prune_flights(
+        self,
+        max_age_seconds: float = FLIGHT_MAX_AGE_SECONDS,
+        max_rows: int = FLIGHT_MAX_ROWS,
+    ) -> None:
+        """Bound the flights section by age and size (keeps the newest rows)."""
+        with self._lock:
+            store = self._sections.get(_FLIGHT_SECTION)
+            if not store:
+                return
+            stale = [
+                key
+                for key, row in store.items()
+                if (_age_seconds(row.get("collected_at") or row.get("actual_arrival")) or 0)
+                > max_age_seconds
+            ]
+            for key in stale:
+                store.pop(key, None)
+            if len(store) > max_rows:
+                newest_first = sorted(
+                    store.items(),
+                    key=lambda item: item[1].get("collected_at") or "",
+                    reverse=True,
+                )
+                for key, _ in newest_first[max_rows:]:
+                    store.pop(key, None)
+
     def _prune_positions(self, max_age_seconds: float) -> None:
         with self._lock:
             store = self._sections.get(_POSITION_SECTION)
@@ -144,6 +178,7 @@ class LiveStore:
         # Drop aircraft not seen within the freshness window so the map never
         # shows "ghost" contacts from many minutes ago.
         self._prune_positions(max_age_seconds)
+        self._prune_flights()
         with self._lock:
             positions = list(self._sections.get(_POSITION_SECTION, {}).values())
             flights = list(self._sections.get("flights", {}).values())
@@ -190,12 +225,17 @@ class LiveStore:
             reference = {kind: len(bucket) for kind, bucket in self._reference.items()}
             updated = {k: v.isoformat() for k, v in self._updated.items()}
             totals = dict(self._totals)
+        ages = {k: _age_seconds(v) for k, v in updated.items()}
+        positions_age = ages.get(_POSITION_SECTION)
+        status = (
+            "ok" if positions_age is not None and positions_age <= max_age_seconds else "degraded"
+        )
         return {
-            "status": "ok",
+            "status": status,
             "sections": sections,
             "reference": reference,
             "updatedAt": updated,
-            "ageSeconds": {k: _age_seconds(v) for k, v in updated.items()},
+            "ageSeconds": ages,
             "maxAgeSeconds": max_age_seconds,
             "totals": totals,
         }

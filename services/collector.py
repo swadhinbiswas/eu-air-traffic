@@ -50,6 +50,7 @@ class CollectorService:
         self.store = LiveStore()
         self._route_memory = RouteMemory(self.settings.checkpoint_dir / "route_memory.json")
         self._running = False
+        self._stopped = False
         self._api_server: Any = None
         self._last_publish: dict[str, float] = {}
         self.stats: dict[str, int] = {"kafka": 0, "bronze": 0, "live": 0}
@@ -81,7 +82,7 @@ class CollectorService:
         if source.name == "reference":
             self.store.update_reference(records)
         else:
-            self.store.update(source.name, records, source.key)
+            self.store.update(source.store_section or source.name, records, source.key)
         self.stats["live"] += len(records)
 
         if not publish:
@@ -158,6 +159,7 @@ class CollectorService:
 
     async def run(self, serve_api: bool = True) -> None:
         self._running = True
+        self._stopped = False
         self.bus.connect()
         logger.info(
             "[collector] starting — %s sources, kafka=%s, api=%s",
@@ -196,8 +198,9 @@ class CollectorService:
             self.stop()
 
     def stop(self) -> None:
-        if not self._running:
+        if self._stopped:
             return
+        self._stopped = True
         self._running = False
         if self._api_server is not None:
             self._api_server.should_exit = True

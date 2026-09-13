@@ -84,6 +84,7 @@ class AirlabsSource(Source):
 
     name = "airlabs"
     key = "flight_id"
+    store_section = "flights"
 
     def __init__(
         self,

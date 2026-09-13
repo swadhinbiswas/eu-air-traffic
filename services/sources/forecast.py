@@ -61,7 +61,9 @@ class ForecastSource(Source):
     """Current + 24h hourly forecast for European airports."""
 
     name = "forecast"
-    key = "station_icao"
+    # A station has ~25 rows (current + hourly); station_icao alone collapsed
+    # them all into one. Key on station + timestamp.
+    key = "forecast_key"
 
     def __init__(self, app_settings=None, session: requests.Session | None = None) -> None:
         super().__init__(app_settings)
@@ -99,6 +101,7 @@ class ForecastSource(Source):
                 {
                     "_kind": "forecast",
                     "station_icao": icao,
+                    "forecast_key": f"{icao}_current_{current.get('time', '')}",
                     "timestamp": f"{current.get('time', '')}:00+00:00",
                     "is_forecast": False,
                     "temperature_c": current.get("temperature_2m"),
@@ -126,6 +129,7 @@ class ForecastSource(Source):
                 {
                     "_kind": "forecast",
                     "station_icao": icao,
+                    "forecast_key": f"{icao}_hourly_{stamp}",
                     "timestamp": f"{stamp}:00+00:00",
                     "is_forecast": True,
                     "temperature_c": _at(hourly.get("temperature_2m"), index),

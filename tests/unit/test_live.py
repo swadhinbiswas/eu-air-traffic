@@ -494,3 +494,29 @@ def test_reference_reads_the_committed_network() -> None:
         reference.route_distance_km("EDDF", "EGLL")
         and reference.route_distance_km("EDDF", "EGLL") > 600
     )
+
+
+def test_collector_stop_flushes_exactly_once() -> None:
+    """stop() used to return early because run() clears _running first."""
+    from services.collector import CollectorService
+    from services.sources.base import Source
+
+    class _Noop(Source):
+        name = "positions"
+        key = "icao24"
+
+        def fetch(self):
+            return []
+
+    svc = CollectorService(sources=[_Noop()])
+    closed = {"count": 0}
+    svc.bus.close = lambda: closed.__setitem__("count", closed["count"] + 1)  # type: ignore[method-assign]
+    svc.stop()
+    svc.stop()
+    assert closed["count"] == 1
+
+
+def test_airlabs_records_land_in_the_flights_section() -> None:
+    from services.sources.airlabs import AirlabsSource
+
+    assert AirlabsSource.store_section == "flights"
