@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -18,6 +18,7 @@ import { NetworkMap } from "@/components/NetworkMap";
 import { useAirports, useAnalytics, useBatchStatus, useKpis } from "@/hooks/useBundle";
 import { useFleet } from "@/hooks/useFleet";
 import { useLiveWeather } from "@/hooks/useLiveWeather";
+import { fetchOfficialTraffic, type OfficialTrafficRow } from "@/lib/tursoData";
 import { airlineFromCallsign } from "@/lib/airlines";
 import { altitudeBand, emergencyLabel, isEmergency } from "@/lib/fleet";
 import { delayTone, nf, pct } from "@/lib/format";
@@ -30,6 +31,22 @@ const BAND_LABEL: Record<string, string> = {
   high: "25–38k ft",
   upper: ">38k ft",
 };
+
+/** Official Eurostat volumes joined to our observed traffic (slow-moving). */
+function useOfficialTraffic(): OfficialTrafficRow[] | null {
+  const [data, setData] = useState<OfficialTrafficRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchOfficialTraffic()
+      .then((result) => alive && setData(result))
+      .catch(() => alive && setData([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return data;
+}
+
 
 export function AnalyticsPage() {
   const { data: analytics, loading, error } = useAnalytics();
@@ -278,6 +295,8 @@ export function AnalyticsPage() {
       </div>
 
       <Panel>
+      <OfficialTrafficPanel />
+
         <PanelTitle icon={<Plane className="h-3.5 w-3.5" />} title="Airport leaderboard" hint="Gold mart · gold_airport_metrics" />
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -483,5 +502,110 @@ function PanelTitle({ icon, title, hint }: { icon: ReactNode; title: string; hin
       </div>
       <span className="hud-label">{hint}</span>
     </div>
+  );
+}
+
+/**
+ * Official vs observed airport traffic: Eurostat's monthly passengers next to
+ * our counted movements, with each source's rank. Official statistics are the
+ * ground truth this dashboard checks itself against.
+ */
+function OfficialTrafficPanel() {
+  const official = useOfficialTraffic();
+  if (official === null) return null;
+  if (official.length === 0) {
+    return (
+      <Panel>
+        <PanelTitle
+          icon={<Plane className="h-3.5 w-3.5" />}
+          title="Official vs observed traffic"
+          hint="Eurostat avia_paoa · gold_airport_official_traffic"
+        />
+        <p className="text-xs text-zinc-500">
+          The monthly Eurostat benchmark lands with a two-month lag; it appears here after the next
+          lake run.
+        </p>
+      </Panel>
+    );
+  }
+  const matched = official.filter((row) => row.observed_flights !== null);
+  const totalPax = official.reduce((sum, row) => sum + (row.passengers_12m ?? 0), 0);
+  const totalFlights = matched.reduce((sum, row) => sum + (row.observed_flights ?? 0), 0);
+  const exactRanks = matched.filter((row) => row.observed_rank === row.official_rank).length;
+  return (
+    <Panel>
+      <PanelTitle
+        icon={<Plane className="h-3.5 w-3.5" />}
+        title="Official vs observed traffic"
+        hint={`Eurostat avia_paoa · ${official[0]?.latest_month ?? ""} · gold_airport_official_traffic`}
+      />
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Airports cross-checked" value={nf(matched.length, 0)} tone="emerald" />
+        <StatCard label="Official pax · 12m" value={`${nf(totalPax / 1_000_000, 1)}M`} tone="sky" />
+        <StatCard label="Observed flights" value={nf(totalFlights, 0)} tone="cyan" />
+        <StatCard label="Exact rank match" value={pct(exactRanks / Math.max(matched.length, 1), 0)} tone="amber" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-zinc-500">
+            <tr className="border-b border-white/5">
+              <th className="py-2 pr-4 font-medium">#</th>
+              <th className="py-2 pr-4 font-medium">Airport</th>
+              <th className="py-2 pr-4 text-right font-medium">Official pax 12m</th>
+              <th className="py-2 pr-4 text-right font-medium">Observed flights</th>
+              <th className="py-2 pr-4 text-right font-medium">Pax / flight</th>
+              <th className="py-2 text-right font-medium">Rank Δ</th>
+            </tr>
+          </thead>
+          <tbody className="mono tabular-nums">
+            {official.slice(0, 12).map((row) => {
+              const delta = row.observed_rank === null ? null : row.official_rank - row.observed_rank;
+              return (
+                <tr key={row.airport_icao} className="border-b border-white/5 last:border-0">
+                  <td className="py-2 pr-4 text-zinc-500">{row.official_rank}</td>
+                  <td className="py-2 pr-4 text-zinc-200">
+                    {row.airport_name ?? row.airport_icao}
+                    <span className="ml-2 text-[10px] text-zinc-600">{row.airport_icao}</span>
+                  </td>
+                  <td className="py-2 pr-4 text-right">
+                    {row.passengers_12m ? `${nf(row.passengers_12m / 1_000_000, 2)}M` : "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-right">
+                    {row.observed_flights ? nf(row.observed_flights, 0) : "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-right">
+                    {row.passengers_12m && row.observed_flights
+                      ? nf(row.passengers_12m / row.observed_flights, 0)
+                      : "—"}
+                  </td>
+                  <td className="py-2 text-right">
+                    {delta === null ? (
+                      "—"
+                    ) : (
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-0.5",
+                          delta >= 0
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-amber-500/10 text-amber-300",
+                        )}
+                      >
+                        {delta > 0 ? "+" : ""}
+                        {delta}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+        Passengers per flight is a load-factor proxy: Eurostat&apos;s 12-month passengers divided by
+        the movements this platform counted. Rank Δ is official rank minus observed rank — positive
+        means we see the airport comparatively busier than the passenger totals suggest.
+      </p>
+    </Panel>
   );
 }
