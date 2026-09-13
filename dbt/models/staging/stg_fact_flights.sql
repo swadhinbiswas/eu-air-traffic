@@ -16,7 +16,16 @@ renamed as (
         scheduled_arrival,
         actual_departure,
         actual_arrival,
-        status,
+        -- Sources have used en_route/enroute historically; map to one canonical
+        -- vocabulary. An unrecognised value becomes NULL rather than a wrong
+        -- state.
+        case
+            when status is null then null
+            when lower(trim(status)) in ('en_route', 'enroute', 'en route') then 'en-route'
+            when lower(trim(status)) in ('landed', 'scheduled', 'cancelled', 'diverted', 'active', 'en-route')
+                then lower(trim(status))
+            else null
+        end as status,
         -- NULL means "no schedule was available" (OpenSky movements), which is
         -- different from "on time". Punctuality averages must ignore it.
         delay_minutes,
