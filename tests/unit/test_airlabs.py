@@ -117,3 +117,30 @@ def test_airlabs_rotates_hubs_and_persists_calls(tmp_path) -> None:
 
     src.fetch()
     assert session.hubs[2:] == ["LFPG", "EHAM"]
+
+
+def test_airlabs_falls_back_to_iata_when_icao_query_is_empty(tmp_path) -> None:
+    """A free key can reject dep_icao; the source must retry with dep_iata."""
+    from services.sources.airlabs import AirlabsSource
+
+    class _IcaoEmptySession:
+        def __init__(self):
+            self.params: list[dict] = []
+
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.params.append(dict(params or {}))
+            if "dep_icao" in params:
+                return _FakeResponse({"response": []})
+            return _FakeResponse(_SCHEDULE)
+
+    session = _IcaoEmptySession()
+    src = AirlabsSource(
+        _settings(tmp_path, airlabs_hubs_per_cycle=1),
+        session=session,
+        state_path=tmp_path / "state.json",
+    )
+    rows = src.fetch()
+    assert rows, "IATA fallback returned nothing"
+    assert "dep_icao" in session.params[0]
+    assert "dep_iata" in session.params[1]
+    assert rows[0]["departure_icao"] == "EDDF"
