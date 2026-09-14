@@ -183,3 +183,17 @@ def test_unchanged_static_tables_are_reuploaded_only_on_change(tmp_path):
     assert "gold_airport_metrics" not in counts
     # Positions are the deliberate exception: capped, not skipped forever.
     assert STATIC_REFRESH_SECONDS.get("fact_positions", 0) > 0
+
+
+def test_epoch_ms_accepts_strings_and_datetimes():
+    """collected_at is a VARCHAR in DuckDB; timestamp is a TIMESTAMPTZ."""
+    from datetime import UTC, datetime
+
+    from scripts.publish_turso import _epoch_ms
+
+    expected = int(datetime(2026, 1, 1, 10, 0, tzinfo=UTC).timestamp() * 1000)
+    assert _epoch_ms("2026-01-01T10:00:00+00:00") == expected
+    assert _epoch_ms("2026-01-01T10:00:00Z") == expected
+    assert _epoch_ms("2026-01-01T10:00:00") == expected  # naive treated as UTC
+    assert _epoch_ms(datetime(2026, 1, 1, 10, 0, tzinfo=UTC)) == expected
+    assert _epoch_ms("not-a-timestamp") == 0
