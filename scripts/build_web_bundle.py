@@ -728,7 +728,10 @@ def _build_stories(
                 "chart": {
                     "type": "doughnut",
                     "data": [
-                        {"label": "On time", "value": total_flights - delayed - cancelled},
+                        {
+                            "label": "On time",
+                            "value": (total_flights or 0) - (delayed or 0) - (cancelled or 0),
+                        },
                         {"label": "Delayed > 15m", "value": delayed},
                         {"label": "Cancelled", "value": cancelled},
                     ],
