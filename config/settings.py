@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     # call, so a rotating pair of hubs every six hours stays inside budget.
     airlabs_api_key: str | None = Field(default=None)
     airlabs_interval_seconds: float = Field(default=21600.0, ge=3600.0)
-    airlabs_hubs_per_cycle: int = Field(default=2, ge=1, le=8)
+    airlabs_hubs_per_cycle: int = Field(default=4, ge=1, le=8)
     airlabs_monthly_budget: int = Field(default=800, ge=0)
     metar_interval_seconds: float = Field(default=300.0, ge=60.0)
     taf_interval_seconds: float = Field(default=900.0, ge=60.0)

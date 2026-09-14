@@ -37,6 +37,16 @@ enriched as (
             when f.delay_minutes <= {{ var('on_time_threshold_minutes') }} then true
             else false
         end as is_on_time,
+        -- AirLabs can report delay 0 while the actual arrival slipped; where a
+        -- row carries both actual and scheduled times, the difference is the
+        -- real delay. Rows without a schedule stay NULL (unknown, not on time).
+        coalesce(
+            case
+                when f.actual_arrival is not null and f.scheduled_arrival is not null
+                then greatest(0, cast(epoch(f.actual_arrival - f.scheduled_arrival) / 60 as double))
+            end,
+            f.delay_minutes
+        ) as delay_minutes,
         coalesce(f.scheduled_departure, f.actual_departure) as reference_departure,
         cast(coalesce(f.scheduled_departure, f.actual_departure) as date) as flight_date,
         hour(coalesce(f.scheduled_departure, f.actual_departure)) as departure_hour,
