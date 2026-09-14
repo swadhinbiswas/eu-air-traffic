@@ -668,7 +668,7 @@ def _build_stories(
                 "unit": "departures",
                 "narrative": (
                     f"{top['airport_icao']} handles {share}% of all observed departures, "
-                    f"averaging {top['avg_delay_minutes']:.0f} min delay and a "
+                    f"averaging {(top['avg_delay_minutes'] or 0):.0f} min delay and a "
                     f"{_pct(top['on_time_rate'])}% on-time rate."
                 ),
                 "chart": {
@@ -723,7 +723,7 @@ def _build_stories(
                 "narrative": (
                     f"{delayed} of {total_flights} flights arrived more than 15 minutes late; "
                     f"{cancelled} were cancelled. Average delay across active flights is "
-                    f"{avg_delay:.0f} minutes."
+                    f"{(avg_delay or 0):.0f} minutes."
                 ),
                 "chart": {
                     "type": "doughnut",
@@ -750,13 +750,13 @@ def _build_stories(
                 "id": "weather-penalty",
                 "category": "Weather",
                 "tone": "warning",
-                "title": f"{worst_w['weather_condition']} weather adds {penalty:.0f} min of delay",
-                "metric": f"+{penalty:.0f}",
+                "title": f"{worst_w['weather_condition']} weather adds {(penalty or 0):.0f} min of delay",
+                "metric": f"+{(penalty or 0):.0f}",
                 "unit": "minutes vs best",
                 "narrative": (
                     f"Flights in {worst_w['weather_condition']} conditions average "
-                    f"{worst_w['avg_delay_minutes']:.0f} min delay, compared with "
-                    f"{best_w['avg_delay_minutes']:.0f} min under {best_w['weather_condition']}."
+                    f"{(worst_w['avg_delay_minutes'] or 0):.0f} min delay, compared with "
+                    f"{(best_w['avg_delay_minutes'] or 0):.0f} min under {best_w['weather_condition']}."
                 ),
                 "chart": {
                     "type": "bar",
@@ -785,7 +785,7 @@ def _build_stories(
                 "unit": "flights in peak hour",
                 "narrative": (
                     f"Network activity concentrates around {int(peak['hour_of_day']):02d}:00 UTC, "
-                    f"when delay averages {peak['avg_delay']:.0f} minutes."
+                    f"when delay averages {(peak['avg_delay'] or 0):.0f} minutes."
                 ),
                 "chart": {"type": "line", "x": "hour_of_day", "y": "flight_count", "data": hourly},
             }
@@ -808,12 +808,12 @@ def _build_stories(
                 "category": "Network",
                 "tone": "info",
                 "title": f"{longest['origin']} → {longest['destination']} is the longest link",
-                "metric": f"{longest['distance_km']:.0f}",
+                "metric": f"{(longest['distance_km'] or 0):.0f}",
                 "unit": "km great-circle",
                 "narrative": (
                     f"The network spans {len(routes)} routes. The longest is "
                     f"{longest['origin']} to {longest['destination']} at "
-                    f"{longest['distance_km']:.0f} km."
+                    f"{(longest['distance_km'] or 0):.0f} km."
                 ),
                 "chart": {
                     "type": "scatter",
@@ -837,12 +837,12 @@ def _build_stories(
                 "category": "Emissions",
                 "tone": "warning",
                 "title": f"{top_e['aircraft_type']} is the highest-emitting type",
-                "metric": f"{top_e['co2_kg_per_hour'] / 1000:.1f}",
+                "metric": f"{(top_e['co2_kg_per_hour'] or 0) / 1000:.1f}",
                 "unit": "t CO₂ / hour",
                 "narrative": (
                     f"Per-hour CO₂ emissions range from "
-                    f"{emissions[-1]['co2_kg_per_hour']:.0f} to "
-                    f"{top_e['co2_kg_per_hour']:.0f} kg across monitored aircraft types."
+                    f"{(emissions[-1]['co2_kg_per_hour'] or 0):.0f} to "
+                    f"{(top_e['co2_kg_per_hour'] or 0):.0f} kg across monitored aircraft types."
                 ),
                 "chart": {
                     "type": "bar",
@@ -865,7 +865,7 @@ def _build_stories(
                 "title": f"{live:,} aircraft currently broadcasting in European airspace",
                 "metric": f"{live:,}",
                 "unit": "live aircraft",
-                "narrative": f"Average cruise altitude of tracked aircraft is {alt:,.0f} ft.",
+                "narrative": f"Average cruise altitude of tracked aircraft is {(alt or 0):,.0f} ft.",
                 "chart": {"type": "stat", "data": [{"label": "Live aircraft", "value": live}]},
             }
         )
