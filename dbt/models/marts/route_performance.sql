@@ -16,11 +16,16 @@ performance as (
         count(f.flight_id) as total_flights,
         round(avg(f.delay_minutes), 2) as avg_delay_minutes,
         round(
-            avg(case when f.delay_minutes <= {{ var('on_time_threshold_minutes') }} then 1.0 else 0.0 end), 4
+            avg(case
+                when f.delay_minutes is null then null
+                when f.delay_minutes <= {{ var('on_time_threshold_minutes') }} then 1.0
+                else 0.0
+            end), 4
         ) as on_time_rate,
         avg(r.distance_km) as avg_distance_km
     from routes r
-    left join flights f on f.departure_icao = r.origin and f.arrival_icao = r.destination
+    inner join flights f
+        on f.departure_icao = r.origin and f.arrival_icao = r.destination
     group by r.origin, r.destination, r.airline
 )
 
