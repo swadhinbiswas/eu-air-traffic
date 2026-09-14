@@ -95,3 +95,17 @@ jobs:
           name: web-dashboard
           path: web/dist
           if-no-files-found: error
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build collector image
+        run: docker build -f docker/Dockerfile.collector -t eu-air-traffic-collector:ci .
+
+      - name: Build lake image
+        run: docker build -f docker/lake-job.Dockerfile -t eu-air-traffic-lake:ci .
+

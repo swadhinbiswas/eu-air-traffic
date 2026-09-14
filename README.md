@@ -145,6 +145,19 @@ Tuning knobs (defaults are safe): `POSITIONS_INTERVAL_SECONDS=15`,
 - **Anywhere else:** `docker/lake-job.Dockerfile` + `scripts/run_lake.sh` runs one
   full cycle in a container (set `HF_SYNC=0` when the dataset is mounted).
 
+### Deploy with Docker (one command)
+
+```bash
+cp .env.example .env      # fill in your credentials
+./deploy.sh               # collector + lake; add --tls to put Caddy in front
+```
+
+`docker-compose.yml` wires the collector (live API on `:8090`, healthchecked),
+the lake cycle on a timer — sharing the same `.env` and DuckDB state — and an
+optional Caddy TLS front via `SITE_ADDRESS`. `./deploy.sh --logs`, `--ps` and
+`--down` manage the stack. No local Kafka is needed: point `.env` at Aiven (or
+any broker) and the containers connect out.
+
 ## Reliability engineering — what broke and what it taught
 
 This platform runs unattended on free infrastructure. The interesting engineering
