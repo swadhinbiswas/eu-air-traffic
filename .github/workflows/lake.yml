@@ -107,6 +107,9 @@ jobs:
       - name: Quality report (Ops page source)
         run: uv run python -m pipelines.quality
 
+      - name: Pipeline report (Ops page source)
+        run: uv run python -m scripts.write_pipeline_report
+
       - name: Publish site tables (stories, ops, lineage) to MotherDuck
         run: uv run python -m scripts.publish_site_tables
 
