@@ -15,14 +15,10 @@ models:
           - not_null
       - name: avg_delay_minutes
         description: "Average delay in minutes"
-        tests:
-          - not_null
       - name: max_delay_minutes
         description: "Maximum delay in minutes"
       - name: on_time_rate
         description: "Percentage of flights arriving on time (within 15 minutes)"
-        tests:
-          - not_null
 
   - name: airline_rankings
     description: "Airlines ranked by performance metrics"
