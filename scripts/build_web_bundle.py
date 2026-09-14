@@ -665,7 +665,7 @@ def _build_stories(
     )
     if top_airports:
         top = top_airports[0]
-        share = round(top["total_flights"] / total_flights * 100, 1) if total_flights else 0
+        share = round(_n(top["total_flights"]) / _n(total_flights) * 100, 1) if total_flights else 0
         stories.append(
             {
                 "id": "busiest-hub",
@@ -791,11 +791,11 @@ def _build_stories(
                 "id": "peak-hour",
                 "category": "Traffic",
                 "tone": "info",
-                "title": f"Aircraft rush hour peaks at {int(peak['hour_of_day']):02d}:00 UTC",
-                "metric": f"{int(peak['flight_count'])}",
+                "title": f"Aircraft rush hour peaks at {int(_n(peak['hour_of_day'])):02d}:00 UTC",
+                "metric": f"{int(_n(peak['flight_count']))}",
                 "unit": "flights in peak hour",
                 "narrative": (
-                    f"Network activity concentrates around {int(peak['hour_of_day']):02d}:00 UTC, "
+                    f"Network activity concentrates around {int(_n(peak['hour_of_day'])):02d}:00 UTC, "
                     f"when delay averages {(peak['avg_delay'] or 0):.0f} minutes."
                 ),
                 "chart": {"type": "line", "x": "hour_of_day", "y": "flight_count", "data": hourly},
