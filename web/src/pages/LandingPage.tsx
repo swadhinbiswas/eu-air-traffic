@@ -131,7 +131,7 @@ function AircraftInfo({ plane, onClose }: { plane: Aircraft; onClose: () => void
         <Metric icon={<Radar className="h-3 w-3" />} label="Track">
           {plane.trackDeg !== null ? `${nf(plane.trackDeg, 0)}°` : "—"}
         </Metric>
-        <Metric icon={<ArrowUpRight className="h-3 w-3" />} label="Vert rate">
+        <Metric icon={<ArrowUpRight className="h-4 w-4" />} label="Vert rate">
           {plane.verticalRateFpm !== null ? `${nf(plane.verticalRateFpm, 0)} fpm` : "—"}
         </Metric>
       </div>
@@ -586,31 +586,31 @@ export function LandingPage() {
       </div>
 
       {/* Bottom: ticker + stories link */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center gap-4 border-t border-white/10 bg-black/70 px-4 py-2 backdrop-blur-xl">
+      <div className="absolute bottom-0 left-0 right-0 z-10 flex items-center gap-5 border-t border-white/10 bg-black/80 px-5 py-3 backdrop-blur-xl">
         <Link
           to="/stories"
-          className="flex flex-none items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-300 transition-colors hover:bg-emerald-500/20"
+          className="flex flex-none items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
         >
-          <Sparkles className="h-3 w-3" />
+          <Sparkles className="h-4 w-4" />
           Data stories
           <ArrowUpRight className="h-3 w-3" />
         </Link>
         <div className="relative flex-1 overflow-hidden">
           {ticker.length ? (
-            <div className="animate-ticker flex w-max gap-8 whitespace-nowrap">
+            <div className="animate-ticker flex w-max gap-10 whitespace-nowrap">
               {[...ticker, ...ticker].map((t, i) => (
-                <span key={i} className="mono text-[10px] text-zinc-500">
+                <span key={i} className="mono text-sm text-zinc-300">
                   {t}
                 </span>
               ))}
             </div>
           ) : (
-            <span className="mono text-[10px] text-zinc-600">
+            <span className="mono text-sm text-zinc-400">
               Awaiting live feed from the VPS collector…
             </span>
           )}
         </div>
-        <span className="mono hidden flex-none text-[10px] text-zinc-600 lg:block">
+        <span className="mono hidden flex-none text-xs text-zinc-500 lg:block">
           © CARTO · OSM · RainViewer
         </span>
       </div>
