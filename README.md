@@ -1,18 +1,21 @@
+<img src="images/logo.svg" width="48" alt="EU air traffic logo" align="left" />
+
 # EU Air Traffic — a zero-cost air-traffic data platform
 
 [![CI](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml)
 [![Lake](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Live dashboard:** https://airtraffic-eu.pages.dev · **Live API:** https://vps.swadhin.cv/health
-**Walkthrough video:** _link coming — replace `VIDEO_URL` below_
+<br clear="left" />
 
-[![Watch the walkthrough](https://img.shields.io/badge/YouTube-watch-red?logo=youtube)](VIDEO_URL)
+Live dashboard: https://airtraffic-eu.pages.dev
+· Live API: https://vps.swadhin.cv/health
+· Demo video: coming soon
 
-A real-time and analytical view of European airspace: live aircraft positions,
-weather, schedules, delays, emissions and official Eurostat traffic benchmarks —
-built end-to-end on free tiers, with every quota, credit and write budget
-engineered deliberately.
+I built this to watch European airspace without spending anything: live
+aircraft positions, weather, schedules, delays, emissions, and Eurostat's
+official passenger numbers as a benchmark. The free tiers are the whole game
+here, so quotas and budgets drive most of the design decisions below.
 
 ---
 
@@ -20,59 +23,40 @@ engineered deliberately.
 
 | Layer | What you get |
 |---|---|
-| **Live map** | ~2,000 aircraft with callsign, type, altitude, speed, vertical rate, route lines, METAR/TAF stations, searchable by callsign/registration/type/airport |
-| **Live analytics** | Airspace composition, altitude bands, operators, carbon intensity (OpenAP kinematic model, measured vs. estimated) |
-| **Business analysis** | Delays, punctuality, cancellations, airport leaderboard, airline rankings, route performance, weather impact, seasonal trends |
-| **Official benchmark** | Eurostat monthly passengers per airport cross-checked against the movements this platform observed |
-| **SQL workbench** | Query the serving copy directly in the browser (read-only token) |
-| **Ops** | Pipeline step report, data-quality report, dbt lineage, freshness |
+| Live map | ~2,000 aircraft with callsign, type, altitude, speed, vertical rate, route lines, METAR/TAF stations, searchable by callsign/registration/type/airport |
+| Live analytics | Airspace composition, altitude bands, operators, carbon intensity (OpenAP kinematic model, measured vs. estimated) |
+| Business analysis | Delays, punctuality, cancellations, airport leaderboard, airline rankings, route performance, weather impact, seasonal trends |
+| Official benchmark | Eurostat monthly passengers per airport cross-checked against the movements this platform observed |
+| SQL workbench | Query the serving copy directly in the browser (read-only token) |
+| Ops | Pipeline step report, data-quality report, dbt lineage, freshness |
 
 ## Architecture
 
-```
-                    ┌────────────────────── VPS (2 cores, systemd) ──────────────────────┐
-  OpenSky (OAuth2)  │ collector: positions · flights · weather · fuel · reference ·      │
-  adsb.lol          │            AirLabs schedules · live FastAPI (:8090 via Caddy TLS)  │
-  airplanes.live    └───────────────┬───────────────────────────────────────────────────┘
-  aviationweather                   │ publish (batched, keyed)
-  Open-Meteo                        ▼
-  AirLabs                   ┌───────────────┐
-  Eurostat (monthly)        │ Aiven Kafka   │  5 topics: eu-positions · eu-flights ·
-                            │               │  eu-weather · eu-fuel · eu-reference
-                            └───────┬───────┘  (records carry `_kind`, 24h retention)
-                                    │ drain by consumer offset (GitHub Actions, ~15 min)
-                                    ▼
-                    ┌───────────────────────── Lake ─────────────────────────┐
-                    │ Bronze Parquet → Silver (incremental) → DuckDB star    │
-                    │ schema → dbt (103 models/tests) → Gold marts           │
-                    └───────┬───────────────────────────────┬────────────────┘
-                            │                               │
-              Hugging Face dataset lake            MotherDuck warehouse
-              (Bronze/Silver history)              (reproducible, full data)
-                            │                               │
-                            └──────────► Turso serving copy ◄┘
-                                        (read-only token, atomic swaps)
-                                              │
-                                    React + Vite dashboard
-                                    (Cloudflare Pages, live API)
-```
+![EU air traffic architecture: a VPS collector publishes to Kafka, a scheduled pipeline builds bronze, silver and dbt marts, and Hugging Face, MotherDuck and Turso serve the dashboard.](images/eu-air-traffic.png)
+
+A collector on a small VPS polls upstream APIs and publishes to a five-topic
+Kafka cluster. Every 15 minutes a scheduled pipeline drains Kafka, builds
+Bronze/ Silver/ DuckDB layers and dbt marts, then pushes to Hugging Face (the
+dataset lake), MotherDuck (the full warehouse) and Turso (the copy the browser
+is allowed to read). The dashboard reads Turso plus the collector's live API.
 
 ### Why two serving stores
-MotherDuck has the full warehouse but its free plan cannot issue scoped
-read-only tokens. Turso does, so the browser reads a derived, bounded serving
-copy: cheap to hold, safe to expose, refreshed every cycle.
+
+MotherDuck holds the full warehouse, but its free plan cannot issue scoped
+read-only tokens. Turso can, so the browser reads a derived, bounded copy
+there. Cheap to hold, safe to expose, refreshed every cycle.
 
 ## Zero-cost constraints (and how they shaped the design)
 
 | Constraint | Design response |
 |---|---|
-| Kafka free plan: **5 topics only** | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
-| OpenSky: **credit budgets per endpoint** | `/flights/all` (one request, both ends) + live departures for 4 hubs + a nightly arrivals backfill; ~2.7k of 4k daily credits |
-| AirLabs: **1,000 calls/month, 50 rows/call** | Rotating hubs, persisted monthly counter that stops at the budget, IATA→ICAO resolved from bundled data (no extra calls) |
-| Turso: **row-write budget** | Statics upload only when a content hash changes; positions have a refresh floor; growing tables are watermark-synced |
-| Hugging Face: **storage** | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
+| Kafka free plan: 5 topics only | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
+| OpenSky: credit budgets per endpoint | `/flights/all` (one request, both ends) + live departures for 4 hubs + a nightly arrivals backfill; ~2.7k of 4k daily credits |
+| AirLabs: 1,000 calls/month, 50 rows/call | Rotating hubs, persisted monthly counter that stops at the budget, IATA→ICAO resolved from bundled data (no extra calls) |
+| Turso: row-write budget | Statics upload only when a content hash changes; positions have a refresh floor; growing tables are watermark-synced |
+| Hugging Face: storage | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
 | Runner minutes | Public repo: free. Frontend-only pushes skip the lake entirely |
-| VPS: **2 cores** | The box only collects; all transformation runs in CI |
+| VPS: 2 cores | The box only collects; all transformation runs in CI |
 
 ## Data sources
 
@@ -125,9 +109,9 @@ AIR_TRAFFIC_DUCKDB_PATH=$PWD/warehouse/air_traffic.duckdb uv run dbt build --pro
 | `HF_TOKEN`, `HF_REPO` | Dataset lake |
 | `MOTHERDUCK_TOKEN`, `MOTHERDUCK_DATABASE` | Warehouse |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Serving copy (publisher uses the read-write token) |
-| `VITE_LIVE_URL`, `VITE_TURSO_URL`, `VITE_TURSO_TOKEN` | Dashboard build-time values; the Turso token **must be read-only** |
+| `VITE_LIVE_URL`, `VITE_TURSO_URL`, `VITE_TURSO_TOKEN` | Dashboard build-time values; the Turso token must be read-only |
 
-Tuning knobs (defaults are safe): `POSITIONS_INTERVAL_SECONDS=15`,
+Sane defaults, override only if needed: `POSITIONS_INTERVAL_SECONDS=15`,
 `POSITIONS_PUBLISH_INTERVAL_SECONDS=300`, `FLIGHTS_INTERVAL_SECONDS=1800`,
 `FLIGHTS_LOOKBACK_MINUTES=90`, `FLIGHTS_ARRIVAL_INTERVAL_SECONDS=21600`,
 `AIRLABS_HUBS_PER_CYCLE=4`, `AIRLABS_MONTHLY_BUDGET=800`, `LAKE_WINDOW_SECONDS=420`.
@@ -161,22 +145,22 @@ optional Caddy TLS front via `SITE_ADDRESS`. `./deploy.sh --logs`, `--ps` and
 `--down` manage the stack. No local Kafka is needed: point `.env` at Aiven (or
 any broker) and the containers connect out.
 
-## Reliability engineering — what broke and what it taught
+## Reliability engineering: what broke and what changed
 
-This platform runs unattended on free infrastructure. The interesting engineering
-isn't the happy path; it's these classes of failure, all fixed with tests:
+This platform runs unattended on free infrastructure, and most of the work went
+into failure handling rather than the happy path. Each item below has a test:
 
-- **Silent success.** Steps that logged an error and exited 0 (HF upload rejected
-  by a trailing space in a configured repo id, a Turso publish that never wrote).
-  Failures are now loud, and credentials set-but-empty raise.
+- **Silent success.** Steps logged an error and exited 0 (an HF upload rejected
+  by a trailing space in a configured repo id; a Turso publish that never
+  wrote). Failures are now loud, and credentials that are set but empty raise.
 - **Fresh-boot assumptions.** A publish cadence compared `monotonic()` against
-  `0.0`, which only works if system uptime exceeds the interval — CI runners and
-  restarted services publish nothing. Missing state now means "due".
+  `0.0`, which only works when system uptime exceeds the interval. Missing
+  state now means "due".
 - **Destructive retries.** A failed lake pull could push a single window over
   the full Silver history; publishers could wipe serving tables mid-run. Pulls
   fail the job, and static tables load into a shadow table and swap atomically.
 - **Double counting.** OpenSky movements and AirLabs schedules describe the same
-  flight with different ids; marts now dedupe on callsign + date + endpoint and
+  flight with different ids; marts dedupe on callsign + date + endpoint and
   only average delays that are actually known.
 - **Timezone traps.** Casting `TIMESTAMPTZ` to `TIMESTAMP` shifts by the session
   offset, silently re-reading old rows and skipping boundary ones.
