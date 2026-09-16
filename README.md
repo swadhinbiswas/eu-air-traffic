@@ -1,12 +1,12 @@
-<img src="images/logo.svg" width="48" alt="EU air traffic logo" align="left" />
+# EU Air Traffic
 
-# EU Air Traffic — a zero-cost air-traffic data platform
+<p align="center">
+  <img src="images/logo.svg" width="96" alt="EU air traffic logo" />
+</p>
 
 [![CI](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/ci.yml)
 [![Lake](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml/badge.svg)](https://github.com/swadhinbiswas/eu-air-traffic/actions/workflows/lake.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-<br clear="left" />
 
 Live dashboard: https://airtraffic-eu.pages.dev
 · Live API: https://vps.swadhin.cv/health
