@@ -269,3 +269,60 @@ def test_table_exists_is_authoritative(tmp_path):
         assert publisher._table_exists("not_a_table") is False
     finally:
         publisher._close()
+
+
+def test_clear_name_handles_tables_and_stray_indexes(tmp_path):
+    """A name can be occupied by an index; the swap fallback has to cope."""
+    _, target, source = _run(tmp_path)
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    assert publisher._connect()
+    try:
+        publisher.remote.execute("CREATE INDEX stranded_index ON weather (station_icao)")
+        assert publisher._objects_named("stranded_index") == [("index", "stranded_index")]
+        publisher._clear_name("stranded_index")
+        assert publisher._objects_named("stranded_index") == []
+
+        assert [kind for kind, _ in publisher._objects_named("dim_airport")] == ["table"]
+        publisher._clear_name("dim_airport")
+        assert publisher._objects_named("dim_airport") == []
+    finally:
+        publisher._close()
+
+
+def test_swap_recovers_when_the_name_is_already_taken(tmp_path, monkeypatch):
+    """If the batched swap is rejected, the loaded shadow still lands."""
+    _, target, source = _run(tmp_path)
+
+    src = duckdb.connect(str(source))
+    src.execute("UPDATE dim_airport SET name = 'Frankfurt Sud'")
+    src.close()
+
+    publisher = TursoPublisher(url=f"file:{target}", token=None, db_path=source)
+    assert publisher._connect()
+    original_batch = publisher.remote.batch
+    raised = {"done": False}
+
+    def flaky_batch(statements):
+        # Only the swap (the batch holding ALTER TABLE) is rejected, to mimic a
+        # name collision; the row writes must keep working.
+        if not raised["done"] and any("ALTER TABLE" in sql for sql, _ in statements):
+            raised["done"] = True
+            raise RuntimeError("Turso error: SQLite error: there is already another table")
+        return original_batch(statements)
+
+    monkeypatch.setattr(publisher.remote, "batch", flaky_batch)
+    try:
+        assert publisher._sync_static("dim_airport") == 1
+    finally:
+        publisher._close()
+    assert raised["done"], "the swap batch was never rejected; test did not exercise the fallback"
+
+    con = libsql_client.create_client_sync(url=f"file:{target}")
+    try:
+        assert con.execute("SELECT name FROM dim_airport").rows[0][0] == "Frankfurt Sud"
+        leftovers = con.execute(
+            "SELECT name FROM sqlite_master WHERE name LIKE '%__new' OR name LIKE '%__old'"
+        ).rows
+        assert leftovers == []
+    finally:
+        con.close()
