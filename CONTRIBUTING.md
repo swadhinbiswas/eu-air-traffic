@@ -22,8 +22,7 @@ cp .env.example .env      # fill in what you have; several sources work without 
 uv run pytest
 ```
 
-Python 3.12 or newer. Everything runs on free tiers, so no paid account is
-needed to work on the code. The collector needs Kafka and OpenSky credentials
+Python 3.12 or newer. No paid account is needed to work on the code. The collector needs Kafka and OpenSky credentials
 only if you want to run the full live path; the pipeline and test suite run
 without them.
 

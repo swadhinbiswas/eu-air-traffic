@@ -14,10 +14,11 @@ Live dashboard: https://airtraffic-eu.pages.dev
 · Data lake: https://huggingface.co/datasets/swadhinbiswas/air-traffic
 · Demo video: coming soon
 
-I built this to watch European airspace without spending anything: live
-aircraft positions, weather, schedules, delays, emissions, and Eurostat's
-official passenger numbers as a benchmark. The free tiers are the whole game
-here, so quotas and budgets drive most of the design decisions below.
+A real-time and historical view of European airspace, built as a pipeline rather
+than a demo: live aircraft positions, weather, schedules, delays, emissions, and
+official Eurostat passenger numbers sitting beside the movements this platform
+counted itself. Provider request budgets and write budgets are enforced in code,
+which is what keeps the numbers current without a human watching.
 
 ---
 
@@ -38,18 +39,19 @@ here, so quotas and budgets drive most of the design decisions below.
 
 A collector on a small VPS polls upstream APIs and publishes to a five-topic
 Kafka cluster. Every 15 minutes a scheduled pipeline drains Kafka, builds
-Bronze/ Silver/ DuckDB layers and dbt marts, then pushes to Hugging Face (the
+Bronze, Silver and DuckDB layers and dbt marts, then pushes to Hugging Face (the
 dataset lake), MotherDuck (the full warehouse) and Turso (the copy the browser
 is allowed to read). The dashboard reads Turso plus the collector's live API.
 
 ### Why two serving stores
 
-MotherDuck holds the full warehouse, but its free plan cannot issue scoped
-read-only tokens. Turso can, so the browser reads a derived, bounded copy
-there. Cheap to hold, safe to expose, refreshed every cycle.
+MotherDuck holds the full warehouse, but its user model cannot issue scoped
+read-only tokens to a browser. Turso can, so the site reads a derived, bounded
+copy there instead: small enough to hold cheaply, safe to expose, refreshed
+every cycle.
 
-The raw and curated lake behind all of this — Bronze windows plus the
-eleven Silver snapshots — is published at
+The raw and curated lake behind all of this, Bronze windows plus the eleven
+Silver snapshots, is published at
 https://huggingface.co/datasets/swadhinbiswas/air-traffic (MIT):
 
 ```python
@@ -64,16 +66,16 @@ print(flights[:2])
 It is generated and documented in [`docs/huggingface-dataset.md`](docs/huggingface-dataset.md):
 layout, scripts, cadence, and the dataset card.
 
-## Zero-cost constraints (and how they shaped the design)
+## Constraints and the trade-offs behind them
 
 | Constraint | Design response |
 |---|---|
-| Kafka free plan: 5 topics only | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
+| Kafka: five topics per cluster | One topic per domain; weather (metar/taf/forecast) and reference data multiplex with a `_kind` discriminator the sink splits back into datasets |
 | OpenSky: credit budgets per endpoint | `/flights/all` (one request, both ends) + live departures for 4 hubs + a nightly arrivals backfill; ~2.7k of 4k daily credits |
 | AirLabs: 1,000 calls/month, 50 rows/call | Rotating hubs, persisted monthly counter that stops at the budget, IATA→ICAO resolved from bundled data (no extra calls) |
 | Turso: row-write budget | Statics upload only when a content hash changes; positions have a refresh floor; growing tables are watermark-synced |
-| Hugging Face: storage | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
-| Runner minutes | Public repo: free. Frontend-only pushes skip the lake entirely |
+| Object storage: storage and commit budget | Silver is partitioned per source; only changed files are pushed; unchanged files are recognised as no-ops |
+| CI runners: shared and ephemeral | Frontend-only pushes skip the lake entirely, and the job fails fast instead of retrying silently |
 | VPS: 2 cores | The box only collects; all transformation runs in CI |
 
 ## Data sources
@@ -163,10 +165,87 @@ optional Caddy TLS front via `SITE_ADDRESS`. `./deploy.sh --logs`, `--ps` and
 `--down` manage the stack. No local Kafka is needed: point `.env` at Aiven (or
 any broker) and the containers connect out.
 
+## Running it at scale
+
+This repository ships as one collector, one scheduled batch job and two serving
+stores. The seams are already in the right places for something larger: each
+source is an independent module behind a single interface, Kafka decouples
+collection from processing, the lake is plain Parquet, dbt owns the
+transformations, and the site reads a derived copy that can be rebuilt from the
+warehouse at any time.
+
+| Part | Here | Production swap |
+|---|---|---|
+| Collection | one process on a small host, systemd | several collectors in a consumer group, one deployment per source class, scaling by partition |
+| Event bus | managed Kafka, five topics, 24 h retention | more partitions, longer or tiered retention, a schema registry, dead-letter topics |
+| Lake | Hugging Face dataset, Parquet | S3, R2 or GCS with Iceberg or Delta tables, partitioned by date and entity, compaction on a schedule |
+| Transformation | GitHub Actions, 15-minute schedule | Airflow, Dagster, Prefect or Argo Workflows, with retries, backfills, SLAs and lineage |
+| Warehouse | MotherDuck, dbt on DuckDB | Snowflake, BigQuery, ClickHouse or Postgres, dbt incremental models with a unique key |
+| Serving | Turso read-only copy | Postgres read replica, ClickHouse, or a cache in front of the API, keeping the read-only credential model |
+| Dashboard | Cloudflare Pages | the same, plus preview deployments per pull request |
+| Secrets | `.env` on the host | Vault, AWS Secrets Manager or SOPS with External Secrets, scoped per workload |
+| Observability | `/health` and logs | Prometheus and Grafana, OpenTelemetry traces, per-source freshness and lag alerts |
+| Infrastructure | systemd and Docker Compose | Terraform or Pulumi for resources, Helm for workloads, a staging environment per change |
+
+### Growing the collector
+
+Run each source as its own workload so a slow or rate-limited upstream cannot
+delay the rest. That is already why they have separate intervals. Give topics
+more partitions than consumers and key records by `icao24` or `flight_id`, so
+per-aircraft ordering holds as throughput grows. Move cooldowns, watermarks and
+rate-limit counters out of process memory into Redis or Postgres, and keep
+provider limits in configuration. The budget guard in the AirLabs source is the
+pattern to copy: a persisted counter that stops at a cap instead of hoping the
+schedule holds.
+
+### Growing the lake
+
+Partition Bronze by ingestion time and Silver by entity and date, then compact
+small files on a schedule, which is the first thing that hurts at volume.
+Replace snapshot replacement with a merge on a primary key: an Iceberg or Delta
+`MERGE`, or a dbt incremental model with `unique_key`. Every table here is
+written through one helper, so that change lands in one place. Keep the data
+rules that make the numbers trustworthy: deduplicate across providers, keep
+unknown values NULL, and never let a publish report success without writing.
+Backfills come from Kafka while retention allows, then from Bronze, and every
+transform must be safe to run twice.
+
+### Growing the serving layer
+
+Publish atomically. The shadow-table swap used for Turso maps directly onto an
+Iceberg commit or a Postgres transaction. Cache at the edge with ETag and 304
+handling, serve a slim payload to the polling endpoint, and keep hashed assets
+immutable. Put limits on anything a visitor can trigger: row and time limits on
+SQL, rate limits per address, and a credential that cannot write.
+
+### Operating it
+
+Alert on data freshness per source, not only on process liveness, since the
+quality report already computes what is stale. Keep runbooks for the failures
+this project has already met: upstream 401, 403 and 429 responses, Kafka lag, a
+rejected warehouse publish, and quarantine review. Enforce budgets in code and
+check them on a schedule; the guard that stops an API at its monthly cap works
+the same way as a spend guard. Test the failure paths, because that is where
+almost all of the interesting behaviour lives.
+
+### A deployment order that works
+
+1. Provision the services: object storage, Kafka, the warehouse, the serving
+   database and a secret store.
+2. Build both images, `docker/Dockerfile.collector` and
+   `docker/lake-job.Dockerfile`.
+3. Deploy the collector, then confirm `/health` and that topic offsets advance.
+4. Run one lake cycle by hand and confirm Silver, dbt and the serving copy.
+5. Point the dashboard at the live API and the serving copy, then check the
+   analytics pages against the warehouse.
+6. Add freshness and lag monitoring before adding replicas.
+7. Scale the collector and the lake workers independently, since Kafka is the
+   only thing they share.
+
 ## Reliability engineering: what broke and what changed
 
-This platform runs unattended on free infrastructure, and most of the work went
-into failure handling rather than the happy path. Each item below has a test:
+This pipeline runs unattended, and most of the work went into failure handling
+rather than the happy path. Each item below has a test:
 
 - **Silent success.** Steps logged an error and exited 0 (an HF upload rejected
   by a trailing space in a configured repo id; a Turso publish that never
