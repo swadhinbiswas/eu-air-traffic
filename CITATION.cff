@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "EU Air Traffic: an open platform for live and historical European airspace analytics"
+abstract: >-
+  A self-hosted platform that collects live and scheduled European air traffic
+  data, builds Bronze, Silver and Gold layers with dbt, and publishes a
+  read-only serving copy for a browser dashboard. It ingests ADS-B positions,
+  OpenSky movements, AirLabs schedules, METAR/TAF and forecast weather, fuel
+  prices, and official Eurostat airport passenger figures, and estimates fuel
+  burn and CO2 with a precomputed OpenAP grid.
+type: software
+authors:
+  - family-names: Biswas
+    given-names: Swadhin
+    orcid: "https://orcid.org/0009-0005-2980-6651"
+version: 0.1.0
+date-released: "2026-09-16"
+license: MIT
+repository-code: "https://github.com/swadhinbiswas/eu-air-traffic"
+url: "https://airtraffic-eu.pages.dev"
+keywords:
+  - aviation
+  - ADS-B
+  - air traffic
+  - data engineering
+  - dbt
+  - emissions
+  - Parquet
+  - time series
+identifiers:
+  - type: url
+    value: "https://huggingface.co/datasets/swadhinbiswas/air-traffic"
+    description: "Dataset lake holding the Bronze and Silver layers"
+  - type: url
+    value: "https://vps.swadhin.cv/health"
+    description: "Live collector API"
