@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Turso serving layer now serves dashboard KPIs, freshness, counts and the
+  catalog's row counts from a precomputed one-row `site_summary` table instead
+  of having the browser COUNT/AVG/MAX the fact tables on every poll. Analytics
+  route and status aggregations read the existing Gold marts rather than
+  re-grouping `fact_flights`.
+- The Turso publisher no longer copies `fact_positions` (the live map reads the
+  VPS snapshot) or `fact_notams` (served through `gold_notam_summary`), and
+  drops both from existing serving databases. Large or slow tables keep a
+  refresh floor so a rebuilt warehouse cannot rewrite them every cycle.
+- Dashboard polling pauses on hidden tabs and follows the 15-minute lake
+  cadence instead of refreshing every 30-60 seconds; the data catalog loads
+  independently of analytics.
+
 ## [0.1.0] - 2026-09-16
 
 ### Added

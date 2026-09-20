@@ -19,8 +19,8 @@ const EXAMPLES: { label: string; sql: string }[] = [
     sql: "SELECT weather_condition, flight_count, ROUND(avg_delay_minutes, 1) AS avg_delay\nFROM gold_weather_impact\nORDER BY avg_delay_minutes DESC;",
   },
   {
-    label: "Live altitude bands",
-    sql: "SELECT\n  CASE\n    WHEN altitude < 10000 THEN '1 <10k ft'\n    WHEN altitude < 25000 THEN '2 10-25k ft'\n    WHEN altitude < 38000 THEN '3 25-38k ft'\n    ELSE '4 >38k ft'\n  END AS band,\n  COUNT(*) AS aircraft,\n  ROUND(AVG(velocity), 1) AS avg_speed\nFROM fact_positions\nGROUP BY band\nORDER BY band;",
+    label: "Delay by status",
+    sql: "SELECT status, flight_count, min_delay_minutes, avg_delay_minutes, max_delay_minutes\nFROM gold_delay_analysis\nORDER BY flight_count DESC;",
   },
   {
     label: "Airline punctuality",

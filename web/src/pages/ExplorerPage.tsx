@@ -53,7 +53,7 @@ export function ExplorerPage() {
     out.gold_fuel_price_series = analytics.gold_fuel_price_series;
     out.fact_emissions = analytics.emissions;
     out.dim_aircraft = analytics.fleet;
-    out.dim_route = analytics.routes;
+    out.gold_route_performance = analytics.routes;
     out.status_mix = analytics.status_mix;
     out.dim_airport = (airports ?? []).slice(0, 2000);
     out.live_positions = positions ?? [];

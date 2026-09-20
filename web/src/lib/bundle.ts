@@ -321,6 +321,8 @@ export async function loadBundle<T>(file: string): Promise<T> {
         return (await md.fetchKpis()) as T;
       case "airports.json":
         return (await md.fetchAirports()) as T;
+      case "catalog.json":
+        return (await md.fetchCatalog()) as T;
       case "stories.json":
         return (await md.fetchStories()) as T;
       case "ops.json":
