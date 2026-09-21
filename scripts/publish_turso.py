@@ -20,7 +20,28 @@ Both budgets are constraints, since Turso bills rows read and rows written:
   dropped from the serving copy: the live map reads the VPS snapshot, and the
   Gold marts carry the aggregates the pages actually render.
 
+Free-tier Turso accounts have independent read/write budgets, so the serving
+copy is spread over a fleet of databases described by ``TURSO_TARGETS``:
+
+    TURSO_TARGETS='[
+      {"name": "eu-1", "url": "libsql://...", "token": "...", "tables": ["*"]},
+      {"name": "eu-2", "url": "libsql://...", "token": "...", "tables": ["*"]}
+    ]'
+
+Each target is an independent database (usually a separate Turso account). A
+table named by more than one target is **mirrored**: every target keeps its own
+hash/watermark state and is synced separately, so the browser can fail over to
+another copy when one account is down or out of quota. ``site_summary`` is
+always written to every target. A target that fails does not stop the others —
+one exhausted account must not stall the whole serving copy. Tables a target is
+no longer assigned are dropped from it, so changing the routing is safe and the
+old copy does not linger. No Turso replication/sync is used: the targets are
+plain independent copies. A target added later seeds itself incrementally: its
+empty watermark means growing tables fill in at ``MAX_ROWS_PER_SYNC`` rows per
+cycle while the other copies keep serving.
+
     python -m scripts.publish_turso
+    python -m scripts.publish_turso --target eu-1          # retry one account
     python -m scripts.publish_turso --url file:/tmp/x.db   # local test
 """
 
@@ -32,6 +53,8 @@ import hashlib
 import json
 import math
 import time
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -112,6 +135,109 @@ GROWING_RESET_LOOKBACK_MS: dict[str, int] = {
     "fact_flights": 24 * 3_600_000,
     "weather": 12 * 3_600_000,
 }
+# Every table this publisher may manage in a target. Used to validate routing
+# config and to decide what an unassigned target should drop.
+SERVING_TABLES = frozenset((*STATIC_TABLES, *GROWING_TABLES, "site_summary"))
+# Name of the implicit target built from the legacy single-database variables.
+DEFAULT_TARGET_NAME = "primary"
+
+
+@dataclass(frozen=True)
+class TursoTarget:
+    """One independent Turso database in the serving fleet.
+
+    ``tables`` is the set of serving tables this database is responsible for;
+    an empty tuple means every table. Naming a table in several targets mirrors
+    it: each copy is synced and versioned independently, so a browser can fail
+    over to another when this account is down or out of free-tier quota.
+    ``site_summary`` is implicit and always written everywhere.
+    """
+
+    name: str
+    url: str
+    token: str | None
+    tables: tuple[str, ...] = ()
+
+    def owns(self, table: str) -> bool:
+        return not self.tables or table in self.tables
+
+
+def parse_targets(
+    raw: str | None,
+    *,
+    url: str | None = None,
+    token: str | None = None,
+) -> list[TursoTarget]:
+    """Build the target fleet from ``TURSO_TARGETS`` or the legacy URL vars.
+
+    An explicit ``url`` (CLI override, tests) always means one target owning
+    everything. Malformed JSON, duplicate names and unknown table names raise:
+    a routing typo must fail the run, not silently publish to the wrong place.
+    """
+    if url:
+        return [TursoTarget(DEFAULT_TARGET_NAME, url, token)]
+
+    raw = (raw or "").strip()
+    if not raw:
+        if settings.turso_database_url:
+            return [
+                TursoTarget(
+                    DEFAULT_TARGET_NAME, settings.turso_database_url, settings.turso_auth_token
+                )
+            ]
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"[turso] TURSO_TARGETS is not valid JSON: {exc}") from exc
+    if not isinstance(data, list) or not data:
+        raise RuntimeError("[turso] TURSO_TARGETS must be a non-empty JSON array")
+
+    targets: list[TursoTarget] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(data):
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"[turso] TURSO_TARGETS[{index}] must be an object")
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise RuntimeError(f"[turso] TURSO_TARGETS[{index}] needs a name")
+        if name in seen:
+            raise RuntimeError(f"[turso] duplicate TURSO_TARGETS name: {name}")
+        seen.add(name)
+
+        db_url = str(entry.get("url") or "").strip()
+        if not db_url:
+            raise RuntimeError(f"[turso] TURSO_TARGETS target {name} needs a url")
+
+        tables_raw = entry.get("tables")
+        if tables_raw in (None, "", "*"):
+            tables: tuple[str, ...] = ()
+        elif isinstance(tables_raw, str):
+            tables = tuple(t.strip() for t in tables_raw.split(",") if t.strip())
+        elif isinstance(tables_raw, list):
+            listed = [str(t).strip() for t in tables_raw if str(t).strip()]
+            # A "*" anywhere in the list means the same as listing none.
+            tables = () if "*" in listed else tuple(listed)
+        else:
+            raise RuntimeError(f"[turso] TURSO_TARGETS target {name}: tables must be a list")
+        unknown = [t for t in tables if t not in SERVING_TABLES]
+        if unknown:
+            raise RuntimeError(
+                f"[turso] TURSO_TARGETS target {name} names unknown tables: "
+                + ", ".join(unknown)
+            )
+
+        token_value = entry.get("token")
+        targets.append(
+            TursoTarget(
+                name=name,
+                url=db_url,
+                token=str(token_value) if token_value else None,
+                tables=tables,
+            )
+        )
+    return targets
 
 
 def _sqlite_type(duck_type: str) -> str:
@@ -265,22 +391,37 @@ class _TursoHttpClient:
 
 class TursoPublisher:
     def __init__(
-        self, url: str | None = None, token: str | None = None, db_path: Path | None = None
+        self,
+        url: str | None = None,
+        token: str | None = None,
+        db_path: Path | None = None,
+        *,
+        name: str = DEFAULT_TARGET_NAME,
+        tables: tuple[str, ...] = (),
+        materialize_site: bool = True,
     ):
+        self.name = name
         self.url = url or settings.turso_database_url
         self.token = token or settings.turso_auth_token
         self.db_path = Path(db_path or settings.duckdb_path)
+        # Empty means every serving table; otherwise this target owns only the
+        # listed tables (mirrors are just the same table in several targets).
+        self.tables = tables
+        self.materialize_site = materialize_site
         self.local: duckdb.DuckDBPyConnection | None = None
         self.remote: Any = None
         self.counts: dict[str, int] = {}
 
+    def _owns(self, table: str) -> bool:
+        return not self.tables or table in self.tables
+
     # ── connections ────────────────────────────────────────────────────────
     def _connect(self) -> bool:
         if not self.url:
-            logger.warning("[turso] TURSO_DATABASE_URL not set — skipping")
+            logger.warning("[turso] %s: no URL configured — skipping", self.name)
             return False
         if not self.db_path.exists():
-            logger.error("[turso] local warehouse missing: %s", self.db_path)
+            logger.error("[turso] %s: local warehouse missing: %s", self.name, self.db_path)
             return False
         self.local = duckdb.connect(str(self.db_path), read_only=True)
         if self.url.startswith(("file:", "sqlite:")):
@@ -559,7 +700,35 @@ class TursoPublisher:
         for table in DEPRECATED_TABLES:
             if self._table_exists(table):
                 self.remote.execute(f'DROP TABLE IF EXISTS "{table}"')
-                logger.info("[turso] dropped deprecated serving table %s", table)
+                logger.info("[turso] %s: dropped deprecated serving table %s", self.name, table)
+
+    def _drop_orphans(self) -> None:
+        """Drop serving tables (and stranded swap shadows) this target lost.
+
+        Routing changes: a table moves to another account, a mirror is removed.
+        Without this cleanup the old copy keeps occupying storage and hides the
+        routing drift. Only tables this publisher knows are ever touched.
+        """
+        assigned = set(self.tables) if self.tables else set(SERVING_TABLES)
+        assigned.add("site_summary")
+        present = {
+            str(row[0])
+            for row in self.remote.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).rows
+        }
+        for table in sorted(SERVING_TABLES):
+            if table in assigned:
+                # An interrupted shadow swap can strand a copy; clear it.
+                for suffix in ("__new", "__old"):
+                    shadow = f"{table}{suffix}"
+                    if shadow in present:
+                        self.remote.execute(f'DROP TABLE IF EXISTS "{shadow}"')
+                        logger.info("[turso] %s: dropped stranded %s", self.name, shadow)
+                continue
+            if table in present:
+                self.remote.execute(f'DROP TABLE IF EXISTS "{table}"')
+                logger.info("[turso] %s: dropped unassigned serving table %s", self.name, table)
 
     def _local_tables(self) -> set[str]:
         """Names of the local warehouse tables/views in the main schema."""
@@ -674,28 +843,35 @@ class TursoPublisher:
             ["key", "payload_json"],
             rows,
         )
-        logger.info("[turso] site_summary: %s keys, %s serving tables", len(rows), len(serving))
+        logger.info(
+            "[turso] %s: site_summary: %s keys, %s serving tables",
+            self.name,
+            len(rows),
+            len(serving),
+        )
 
     def run(self) -> dict[str, int]:
-        from scripts.publish_site_tables import build_site_payloads, write_site_tables_local
-
         if not self.url:
             import os
 
             if os.environ.get("TURSO_DATABASE_URL", "unset") == "":
                 raise RuntimeError("[turso] TURSO_DATABASE_URL is set but empty — fix the secret")
-            logger.warning("[turso] TURSO_DATABASE_URL not set — skipping")
+            logger.warning("[turso] %s: no URL configured — skipping", self.name)
             return {}
         if not self.db_path.exists():
-            logger.error("[turso] local warehouse missing: %s", self.db_path)
+            logger.error("[turso] %s: local warehouse missing: %s", self.name, self.db_path)
             return {}
 
         # Site payloads are computed, not stored: materialise them locally first
-        # (this needs a write connection, before the read-only one opens).
-        try:
-            write_site_tables_local(build_site_payloads(), db_path=self.db_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[turso] site payloads unavailable: %s", exc)
+        # (this needs a write connection, before the read-only one opens). When
+        # a run has several targets, publish() does this once up front.
+        if self.materialize_site:
+            from scripts.publish_site_tables import build_site_payloads, write_site_tables_local
+
+            try:
+                write_site_tables_local(build_site_payloads(), db_path=self.db_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[turso] %s: site payloads unavailable: %s", self.name, exc)
 
         if not self._connect():
             return {}
@@ -705,24 +881,32 @@ class TursoPublisher:
                 "(table_name TEXT PRIMARY KEY, watermark TEXT)"
             )
             self._drop_deprecated()
+            self._drop_orphans()
             for table in STATIC_TABLES:
+                if not self._owns(table):
+                    continue
                 written = self._sync_static(table)
                 if written:
                     self.counts[table] = written
             for table in GROWING_TABLES:
+                if not self._owns(table):
+                    continue
                 written = self._sync_growing(table)
                 if written:
                     self.counts[table] = written
             # Last, so counts and freshness reflect everything just written.
-            # Best-effort: the site keeps working (with direct aggregate reads)
-            # until the next successful publish writes it.
+            # Always published, even to a target that owns nothing else: every
+            # copy must be able to serve the summary when a peer fails over.
+            # Best-effort: the site falls back to direct aggregate reads until
+            # the next successful publish writes it.
             try:
                 self._publish_summary()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[turso] site_summary publish failed: %s", exc)
+                logger.warning("[turso] %s: site_summary publish failed: %s", self.name, exc)
 
             logger.info(
-                "[turso] published %s tables → %s (rows: %s)",
+                "[turso] %s: published %s tables → %s (rows: %s)",
+                self.name,
                 len(self.counts),
                 (self.url or "").split("?")[0],
                 sum(self.counts.values()),
@@ -733,10 +917,81 @@ class TursoPublisher:
 
 
 def publish(
-    app_settings: Any = None, url: str | None = None, token: str | None = None
+    app_settings: Any = None,
+    url: str | None = None,
+    token: str | None = None,
+    *,
+    targets_raw: str | None = None,
+    only: Iterable[str] | None = None,
+    db_path: Path | None = None,
 ) -> dict[str, int]:
+    """Publish every configured target, isolating failures per target.
+
+    A down or quota-exhausted account must not stop the others: each target is
+    synced independently and a failure is logged while its mirrors keep serving
+    the site. Only when every selected target fails does this raise.
+    """
     _ = app_settings
-    return TursoPublisher(url=url, token=token).run()
+    targets = parse_targets(
+        settings.turso_targets if targets_raw is None else targets_raw,
+        url=url,
+        token=token,
+    )
+    if only is not None:
+        wanted = set(only)
+        known = {target.name for target in targets}
+        unknown = wanted - known
+        if unknown:
+            raise RuntimeError("[turso] unknown target(s): " + ", ".join(sorted(unknown)))
+        targets = [target for target in targets if target.name in wanted]
+    if not targets:
+        logger.warning("[turso] no targets configured — skipping")
+        return {}
+
+    path = Path(db_path or settings.duckdb_path)
+    if not path.exists():
+        logger.error("[turso] local warehouse missing: %s", path)
+        return {}
+
+    # Site payloads are computed, not stored: materialise them once for every
+    # target, which then syncs its own copy from the local tables.
+    try:
+        from scripts.publish_site_tables import build_site_payloads, write_site_tables_local
+
+        write_site_tables_local(build_site_payloads(), db_path=path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[turso] site payloads unavailable: %s", exc)
+
+    combined: dict[str, int] = {}
+    failures: list[str] = []
+    for target in targets:
+        publisher = TursoPublisher(
+            url=target.url,
+            token=target.token,
+            db_path=path,
+            name=target.name,
+            tables=target.tables,
+            materialize_site=False,
+        )
+        try:
+            counts = publisher.run()
+        except Exception as exc:  # noqa: BLE001 - the other targets must proceed
+            failures.append(target.name)
+            logger.error("[turso] %s: publish failed: %s", target.name, exc)
+            continue
+        for table, written in counts.items():
+            combined[table] = combined.get(table, 0) + written
+
+    if failures and len(failures) == len(targets):
+        raise RuntimeError("[turso] every target failed: " + ", ".join(failures))
+    if failures:
+        logger.warning(
+            "[turso] %s of %s targets failed (%s); mirrors cover the rest",
+            len(failures),
+            len(targets),
+            ", ".join(failures),
+        )
+    return combined
 
 
 def main() -> int:
@@ -744,12 +999,24 @@ def main() -> int:
 
     setup_logging()
     parser = argparse.ArgumentParser(description="Publish serving tables to Turso")
-    parser.add_argument("--url", default=None, help="override TURSO_DATABASE_URL (file: works)")
+    parser.add_argument(
+        "--url", default=None, help="publish a single database, ignoring TURSO_TARGETS (file: works)"
+    )
     parser.add_argument("--token", default=None, help="override TURSO_AUTH_TOKEN")
+    parser.add_argument(
+        "--target",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="sync only this target (repeatable); default: every target",
+    )
+    parser.add_argument(
+        "--targets", default=None, help="override TURSO_TARGETS with this JSON array (testing)"
+    )
     args = parser.parse_args()
     try:
-        counts = publish(url=args.url, token=args.token)
-    except Exception as exc:  # noqa: BLE001 - never fail the whole workflow
+        counts = publish(url=args.url, token=args.token, targets_raw=args.targets, only=args.target)
+    except Exception as exc:  # noqa: BLE001 - report the cause, fail the step
         logger.error("[turso] publish failed: %s", exc)
         return 1
     if not counts:

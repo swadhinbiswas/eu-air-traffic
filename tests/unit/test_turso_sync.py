@@ -6,10 +6,13 @@ uses — so the DDL, upserts and watermark logic are exercised without a network
 
 from __future__ import annotations
 
+import json
+
 import duckdb
 import pytest
 
-from scripts.publish_turso import TursoPublisher
+from scripts import publish_turso
+from scripts.publish_turso import TursoPublisher, parse_targets, publish
 
 libsql_client = pytest.importorskip("libsql_client")
 
@@ -405,3 +408,229 @@ def test_swap_recovers_when_the_name_is_already_taken(tmp_path, monkeypatch):
         assert leftovers == []
     finally:
         con.close()
+
+
+# ── multiple Turso targets ───────────────────────────────────────────────────
+
+
+def _table_names(path) -> set[str]:
+    con = libsql_client.create_client_sync(url=f"file:{path}")
+    try:
+        return {
+            str(r[0])
+            for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").rows
+        }
+    finally:
+        con.close()
+
+
+def _multi_target(tmp_path, monkeypatch, targets: list[dict]):
+    source = tmp_path / "air_traffic.duckdb"
+    _source_db(source)
+    monkeypatch.setattr(publish_turso.settings, "turso_targets", json.dumps(targets))
+    return source
+
+
+def test_parse_targets_accepts_json_and_wildcards():
+    targets = parse_targets(
+        json.dumps(
+            [
+                {
+                    "name": "one",
+                    "url": "libsql://one.turso.io",
+                    "token": "t1",
+                    "tables": ["dim_airport", "fact_flights"],
+                },
+                {"name": "two", "url": "libsql://two.turso.io", "token": "t2"},
+            ]
+        )
+    )
+    assert [t.name for t in targets] == ["one", "two"]
+    assert targets[0].owns("dim_airport")
+    assert targets[0].owns("fact_flights")
+    assert not targets[0].owns("weather")
+    # No tables listed means every serving table (a full mirror).
+    assert targets[1].owns("weather")
+    assert targets[1].owns("site_summary")
+
+    # An explicit url (CLI override, tests) is a single target owning everything.
+    single = parse_targets(None, url="file:/tmp/x.db", token=None)
+    assert len(single) == 1
+    assert single[0].name == publish_turso.DEFAULT_TARGET_NAME
+    assert single[0].owns("weather")
+
+
+def test_parse_targets_rejects_bad_config():
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        parse_targets("{oops")
+    with pytest.raises(RuntimeError, match="unknown tables"):
+        parse_targets(
+            json.dumps([{"name": "a", "url": "libsql://x", "tables": ["dim_airportz"]}])
+        )
+    with pytest.raises(RuntimeError, match="duplicate"):
+        parse_targets(
+            json.dumps(
+                [
+                    {"name": "a", "url": "libsql://x"},
+                    {"name": "a", "url": "libsql://y"},
+                ]
+            )
+        )
+    with pytest.raises(RuntimeError, match="needs a url"):
+        parse_targets(json.dumps([{"name": "a"}]))
+
+
+def test_mirrored_tables_are_published_to_every_target(tmp_path, monkeypatch):
+    """A table named by several targets is an independent copy in each."""
+    first, second = tmp_path / "first.db", tmp_path / "second.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {
+                "name": "eu-1",
+                "url": f"file:{first}",
+                "token": "",
+                "tables": ["dim_airport", "fact_flights"],
+            },
+            {
+                "name": "eu-2",
+                "url": f"file:{second}",
+                "token": "",
+                "tables": ["dim_airport", "fact_flights"],
+            },
+        ],
+    )
+    counts = publish(db_path=source)
+
+    # Both copies are written, so the aggregate counts them twice.
+    assert counts["dim_airport"] == 2
+    assert counts["fact_flights"] == 4
+    for target in (first, second):
+        con = libsql_client.create_client_sync(url=f"file:{target}")
+        try:
+            assert con.execute("SELECT COUNT(*) FROM dim_airport").rows[0][0] == 1
+            assert con.execute("SELECT COUNT(*) FROM fact_flights").rows[0][0] == 2
+            keys = {r[0] for r in con.execute("SELECT key FROM site_summary").rows}
+            assert {"kpis", "catalog"} <= keys
+        finally:
+            con.close()
+
+
+def test_partitioned_targets_only_receive_their_tables(tmp_path, monkeypatch):
+    """Each target holds its assignment plus the always-published summary."""
+    dims, facts = tmp_path / "dims.db", tmp_path / "facts.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "dims", "url": f"file:{dims}", "tables": ["dim_airport"]},
+            {"name": "facts", "url": f"file:{facts}", "tables": ["fact_flights"]},
+        ],
+    )
+    publish(db_path=source)
+
+    assert "dim_airport" in _table_names(dims)
+    assert "fact_flights" not in _table_names(dims)
+    assert "fact_flights" in _table_names(facts)
+    assert "dim_airport" not in _table_names(facts)
+    assert "site_summary" in _table_names(dims)
+    assert "site_summary" in _table_names(facts)
+
+
+def test_moving_a_table_drops_the_old_copy(tmp_path, monkeypatch):
+    """Re-routing a table must not leave it lingering on its old target."""
+    one, two = tmp_path / "one.db", tmp_path / "two.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "one", "url": f"file:{one}", "tables": ["dim_airport"]},
+            {"name": "two", "url": f"file:{two}", "tables": ["dim_airport"]},
+        ],
+    )
+    publish(db_path=source)
+    assert "dim_airport" in _table_names(one)
+    assert "dim_airport" in _table_names(two)
+
+    monkeypatch.setattr(
+        publish_turso.settings,
+        "turso_targets",
+        json.dumps(
+            [
+                {"name": "one", "url": f"file:{one}", "tables": ["dim_airport"]},
+                {
+                    "name": "two",
+                    "url": f"file:{two}",
+                    "tables": ["gold_airport_metrics"],
+                },
+            ]
+        ),
+    )
+    publish(db_path=source)
+
+    assert "dim_airport" in _table_names(one)
+    assert "dim_airport" not in _table_names(two)
+    assert "gold_airport_metrics" in _table_names(two)
+
+
+def test_target_selection_publishes_one_target_only(tmp_path, monkeypatch):
+    first, second = tmp_path / "first.db", tmp_path / "second.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "eu-1", "url": f"file:{first}", "tables": ["*"]},
+            {"name": "eu-2", "url": f"file:{second}", "tables": ["*"]},
+        ],
+    )
+    counts = publish(db_path=source, only=["eu-2"])
+    assert counts["dim_airport"] == 1
+    assert "dim_airport" in _table_names(second)
+    assert not first.exists()
+
+    with pytest.raises(RuntimeError, match="unknown target"):
+        publish(db_path=source, only=["eu-3"])
+
+
+def test_one_failed_target_does_not_stop_the_others(tmp_path, monkeypatch):
+    """An exhausted account must not stall its mirrors."""
+    good = tmp_path / "good.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "dead", "url": "libsql://dead.turso.io", "token": "x", "tables": ["*"]},
+            {"name": "good", "url": f"file:{good}", "tables": ["*"]},
+        ],
+    )
+    original_connect = publish_turso.TursoPublisher._connect
+
+    def connect(self):
+        if self.name == "dead":
+            raise RuntimeError("quota exceeded")
+        return original_connect(self)
+
+    monkeypatch.setattr(publish_turso.TursoPublisher, "_connect", connect)
+    counts = publish(db_path=source)
+    assert counts["dim_airport"] == 1
+    assert "dim_airport" in _table_names(good)
+
+
+def test_all_targets_failing_raises(tmp_path, monkeypatch):
+    _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "one", "url": "libsql://one.turso.io", "token": "x", "tables": ["*"]},
+            {"name": "two", "url": "libsql://two.turso.io", "token": "y", "tables": ["*"]},
+        ],
+    )
+
+    def connect(self):
+        raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(publish_turso.TursoPublisher, "_connect", connect)
+    with pytest.raises(RuntimeError, match="every target failed"):
+        publish(db_path=tmp_path / "air_traffic.duckdb")
+

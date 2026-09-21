@@ -38,8 +38,12 @@ jobs:
           VITE_LIVE_URL: ${{ vars.VITE_LIVE_URL }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           # Gold analytics are read straight from Turso in the browser.
-          # VITE_TURSO_TOKEN MUST be a read-only Turso token — it is inlined
-          # into the JS bundle and visible to anyone.
+          # VITE_TURSO_TARGETS is a JSON array of {name,url,token,tables}; a
+          # table in several targets is mirrored and the dashboard fails over.
+          # Every token in it MUST be read-only — it is inlined into the JS
+          # bundle and visible to anyone. VITE_TURSO_URL/VITE_TURSO_TOKEN are
+          # the legacy single-database values, used when TARGETS is empty.
+          VITE_TURSO_TARGETS: ${{ secrets.VITE_TURSO_TARGETS }}
           VITE_TURSO_URL: ${{ secrets.TURSO_DATABASE_URL }}
           VITE_TURSO_TOKEN: ${{ secrets.VITE_TURSO_TOKEN }}
         run: npm ci && npm run build

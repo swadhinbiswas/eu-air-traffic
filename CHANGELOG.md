@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Multi-database Turso serving. `TURSO_TARGETS` (publisher) and
+  `VITE_TURSO_TARGETS` (dashboard) describe a fleet of independent Turso
+  databases, usually one per free-tier account. Tables are assigned per target,
+  and a table listed under several targets is mirrored. The publisher isolates
+  failures per target, drops tables a target is no longer assigned, and always
+  writes `site_summary` everywhere; the browser routes each query to a target
+  that holds its tables and fails over to another copy when an account is down
+  or out of quota. The legacy single-database variables still work when
+  `TURSO_TARGETS` is empty.
+
 ### Changed
 
+- Removed the unused `TURSO_SERVING_ENABLED` and `TURSO_SYNC_TABLES` settings.
+  The serving table list is fixed in the publisher, and routing now lives in
+  `TURSO_TARGETS`.
 - Turso serving layer now serves dashboard KPIs, freshness, counts and the
   catalog's row counts from a precomputed one-row `site_summary` table instead
   of having the browser COUNT/AVG/MAX the fact tables on every poll. Analytics

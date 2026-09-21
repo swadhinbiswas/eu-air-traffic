@@ -66,7 +66,7 @@ export function SqlPage() {
       } catch (e: unknown) {
         primaryError =
           e instanceof Error
-            ? `Turso: ${e.message} (check VITE_TURSO_URL / VITE_TURSO_TOKEN)`
+            ? `Turso: ${e.message} (check VITE_TURSO_TARGETS)`
             : "Turso connection failed";
       }
     }
@@ -87,7 +87,7 @@ export function SqlPage() {
     setStatus("error");
     setError(
       primaryError ??
-        "No SQL engine configured. Set VITE_TURSO_URL and VITE_TURSO_TOKEN at build time."
+        "No SQL engine configured. Set VITE_TURSO_TARGETS at build time."
     );
   }, []);
 

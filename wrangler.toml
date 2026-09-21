@@ -4,10 +4,13 @@
 #   Build command:        cd web && npm ci && npm run build
 #   Build output:         web/dist   (also declared below)
 # and add the build-time variables under Settings → Environment variables:
-#   VITE_LIVE_URL     https://vps.example.com       (VPS live API)
-#   VITE_TURSO_URL    libsql://<db>-<org>.turso.io  (same as TURSO_DATABASE_URL)
-#   VITE_TURSO_TOKEN  a READ-ONLY Turso token — it is inlined into the bundle
-#   VITE_API_URL      optional FastAPI warehouse API
+#   VITE_LIVE_URL        https://vps.example.com       (VPS live API)
+#   VITE_TURSO_TARGETS   JSON array of {name,url,read-only token,tables}; a
+#                        table listed in several targets is mirrored and the
+#                        dashboard fails over between the copies
+#   VITE_TURSO_URL       legacy single database (used when TARGETS is empty)
+#   VITE_TURSO_TOKEN     READ-ONLY Turso token — inlined into the bundle
+#   VITE_API_URL         optional FastAPI warehouse API
 #
 # Manual deploys:  npx wrangler pages deploy web/dist
 name = "airtraffic-eu"
