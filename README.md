@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://cdn.jsdelivr.net/gh/swadhinbiswas/eu-air-traffic@main/images/eu-air-traffic-cover.svg" width="100%" alt="EU Air Traffic pipeline: upstream APIs feed a VPS collector that publishes to Kafka; a scheduled job builds Bronze, Silver, DuckDB and dbt layers, publishes to Hugging Face and MotherDuck, and syncs the read-only Turso copy the dashboard reads." />
+</p>
+
 # EU Air Traffic
 
 <p align="center">
