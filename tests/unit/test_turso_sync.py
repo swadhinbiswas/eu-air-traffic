@@ -417,8 +417,7 @@ def _table_names(path) -> set[str]:
     con = libsql_client.create_client_sync(url=f"file:{path}")
     try:
         return {
-            str(r[0])
-            for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").rows
+            str(r[0]) for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").rows
         }
     finally:
         con.close()
@@ -464,9 +463,7 @@ def test_parse_targets_rejects_bad_config():
     with pytest.raises(RuntimeError, match="not valid JSON"):
         parse_targets("{oops")
     with pytest.raises(RuntimeError, match="unknown tables"):
-        parse_targets(
-            json.dumps([{"name": "a", "url": "libsql://x", "tables": ["dim_airportz"]}])
-        )
+        parse_targets(json.dumps([{"name": "a", "url": "libsql://x", "tables": ["dim_airportz"]}]))
     with pytest.raises(RuntimeError, match="duplicate"):
         parse_targets(
             json.dumps(
@@ -633,4 +630,3 @@ def test_all_targets_failing_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(publish_turso.TursoPublisher, "_connect", connect)
     with pytest.raises(RuntimeError, match="every target failed"):
         publish(db_path=tmp_path / "air_traffic.duckdb")
-

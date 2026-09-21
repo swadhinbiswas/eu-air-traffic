@@ -224,8 +224,7 @@ def parse_targets(
         unknown = [t for t in tables if t not in SERVING_TABLES]
         if unknown:
             raise RuntimeError(
-                f"[turso] TURSO_TARGETS target {name} names unknown tables: "
-                + ", ".join(unknown)
+                f"[turso] TURSO_TARGETS target {name} names unknown tables: " + ", ".join(unknown)
             )
 
         token_value = entry.get("token")
@@ -1000,7 +999,9 @@ def main() -> int:
     setup_logging()
     parser = argparse.ArgumentParser(description="Publish serving tables to Turso")
     parser.add_argument(
-        "--url", default=None, help="publish a single database, ignoring TURSO_TARGETS (file: works)"
+        "--url",
+        default=None,
+        help="publish a single database, ignoring TURSO_TARGETS (file: works)",
     )
     parser.add_argument("--token", default=None, help="override TURSO_AUTH_TOKEN")
     parser.add_argument(
