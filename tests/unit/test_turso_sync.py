@@ -614,6 +614,37 @@ def test_one_failed_target_does_not_stop_the_others(tmp_path, monkeypatch):
     assert "dim_airport" in _table_names(good)
 
 
+def test_write_blocked_target_does_not_stop_the_others(tmp_path, monkeypatch):
+    """A write-blocked account (free-plan quota) is skipped, not fatal.
+
+    This is the real failover case: Turso refuses writes on one account while
+    its mirror keeps receiving every row, so the dashboard stays fresh.
+    """
+    good = tmp_path / "good.db"
+    source = _multi_target(
+        tmp_path,
+        monkeypatch,
+        [
+            {"name": "blocked", "url": "libsql://blocked.turso.io", "token": "x", "tables": ["*"]},
+            {"name": "good", "url": f"file:{good}", "tables": ["*"]},
+        ],
+    )
+    original_connect = publish_turso.TursoPublisher._connect
+
+    def connect(self):
+        if self.name == "blocked":
+            raise RuntimeError(
+                "Turso error: Operation was blocked: SQL write operations are forbidden "
+                "(writes are blocked, do you need to upgrade your plan?)"
+            )
+        return original_connect(self)
+
+    monkeypatch.setattr(publish_turso.TursoPublisher, "_connect", connect)
+    counts = publish(db_path=source)
+    assert counts["dim_airport"] == 1
+    assert "fact_flights" in _table_names(good)
+
+
 def test_all_targets_failing_raises(tmp_path, monkeypatch):
     _multi_target(
         tmp_path,

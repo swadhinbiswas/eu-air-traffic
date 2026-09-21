@@ -5,9 +5,10 @@
  * queried straight from the browser with **read-only** tokens. Free-tier
  * accounts have their own row budgets, so `VITE_TURSO_TARGETS` spreads the
  * serving copy over them. A table listed under several targets is mirrored:
- * the router prefers the first copy, fails over to the next when an account is
- * down or out of quota, and keeps using the fallback while the failed target
- * cools down. Every copy is an independent database — no Turso replication.
+ * the router reads the freshest copy (ranked from each target's published
+ * freshness), fails over to the next when an account is down or out of quota,
+ * and keeps using the fallback while the failed target cools down. Every copy
+ * is an independent database — no Turso replication.
  *
  *   VITE_TURSO_TARGETS  JSON array of {name,url,token,tables}; `tables` may be
  *                       omitted or "*" for a target holding every serving table
@@ -34,6 +35,11 @@ const TABLES_SQL =
 
 /** How long a failed target is deprioritised before it is probed again. */
 const FAILOVER_COOLDOWN_MS = 60_000;
+/** How often target preference is re-derived from each copy's freshness. */
+const RANKING_TTL_MS = 5 * 60_000;
+/** Give up on a slow freshness probe and keep the configured order. */
+const RANKING_TIMEOUT_MS = 2_500;
+const FRESHNESS_SQL = "SELECT payload_json FROM site_summary WHERE key = 'freshness' LIMIT 1";
 
 function parseTargets(): TursoTarget[] {
   const raw = (import.meta.env.VITE_TURSO_TARGETS as string | undefined)?.trim();
@@ -116,6 +122,58 @@ function markFailed(name: string): void {
   failedUntil.set(name, Date.now() + FAILOVER_COOLDOWN_MS);
 }
 
+let ranked: TursoTarget[] | null = null;
+let rankedAt = 0;
+let ranking: Promise<void> | null = null;
+
+/**
+ * Order targets by the freshness each copy publishes in `site_summary`.
+ *
+ * A write-blocked or paused copy keeps answering reads with old data, and a
+ * stale read never fails over because nothing errors. Ranking by the published
+ * `as_of` means the browser reads the freshest copy even when the config lists
+ * another one first; the configured order breaks ties and carries targets whose
+ * freshness is unknown (empty or unreachable copies).
+ */
+function ensureRanking(): Promise<void> {
+  if (ranking) return ranking;
+  if (ranked && Date.now() - rankedAt < RANKING_TTL_MS) return Promise.resolve();
+
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, RANKING_TIMEOUT_MS));
+  ranking = Promise.race([refreshRanking(), timeout])
+    .catch(() => {
+      /* keep the previous order */
+    })
+    .finally(() => {
+      ranking = null;
+    });
+  return ranking;
+}
+
+async function refreshRanking(): Promise<void> {
+  const scored = await Promise.all(
+    TARGETS.map(async (target, index) => {
+      try {
+        const result = await clientFor(target).execute(FRESHNESS_SQL);
+        const raw = result.rows[0]?.payload_json;
+        const payload = typeof raw === "string" ? (JSON.parse(raw) as { as_of?: unknown }) : null;
+        const at = typeof payload?.as_of === "string" ? Date.parse(payload.as_of) : NaN;
+        return { target, index, at: Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY };
+      } catch {
+        return { target, index, at: Number.NEGATIVE_INFINITY };
+      }
+    })
+  );
+  ranked = scored
+    .sort((a, b) => b.at - a.at || a.index - b.index)
+    .map((entry) => entry.target);
+  rankedAt = Date.now();
+}
+
+function orderedTargets(): TursoTarget[] {
+  return ranked ?? TARGETS;
+}
+
 /**
  * Whether an error means the target itself is unhealthy.
  *
@@ -158,10 +216,11 @@ function tablesInSql(sql: string): string[] {
  * that possible; a config that partitions a join group raises instead.
  */
 function candidatesFor(sql: string): TursoTarget[] {
+  const targets = orderedTargets();
   const referenced = tablesInSql(sql).filter((table) => TABLE_TARGETS.has(table));
-  if (!referenced.length) return TARGETS;
+  if (!referenced.length) return targets;
 
-  const covering = TARGETS.filter((target) =>
+  const covering = targets.filter((target) =>
     referenced.every((table) => covers(target, table))
   );
   if (!covering.length) {
@@ -254,6 +313,7 @@ export async function tursoQuery(sql: string, args: unknown[] = []): Promise<Tur
   if (!tursoConfigured()) {
     throw new Error("Turso is not configured (VITE_TURSO_TARGETS / VITE_TURSO_URL).");
   }
+  await ensureRanking();
   return route(sql, (target) => executeOn(target, sql, args));
 }
 
@@ -296,6 +356,7 @@ export async function tursoBatch(sql: string[]): Promise<TursoResult[]> {
   if (!tursoConfigured()) {
     throw new Error("Turso is not configured (VITE_TURSO_TARGETS / VITE_TURSO_URL).");
   }
+  await ensureRanking();
   const results: Array<TursoResult | undefined> = new Array(sql.length);
   const groups = new Map<string, Array<{ statement: string; index: number }>>();
   for (const [index, statement] of sql.entries()) {
