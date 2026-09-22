@@ -115,6 +115,39 @@ class Settings(BaseSettings):
     )
     turso_auth_token: str | None = Field(default=None)
 
+    # ── AWS lake backend (S3 + Glue/Iceberg) ────────────────────────────────
+    # The lake is Hugging Face by default. ``LAKE_BACKEND=s3`` moves the
+    # Bronze/Silver read-write path onto S3 (see ``services/lake_backend.py``),
+    # which is what the AWS deployment uses; ``local`` writes only under the
+    # warehouse directory and is what the tests use. The callers
+    # (``services/sink.py``, ``scripts/lake_sync.py``) never branch on this
+    # themselves — they ask the factory for a backend.
+    lake_backend: Literal["hf", "s3", "local"] = Field(default="hf")
+    aws_region: str = Field(default="eu-central-1")
+    s3_bucket: str | None = Field(default=None, description="Bucket holding bronze/ and silver/")
+    s3_prefix: str = Field(default="", description="Optional root key prefix inside the bucket")
+    s3_endpoint_url: str | None = Field(
+        default=None, description="Override the S3 endpoint (LocalStack/MinIO); unset on AWS"
+    )
+    s3_storage_class: str = Field(default="STANDARD")
+
+    # ── Aurora PostgreSQL serving layer (AWS replacement for Turso) ─────────
+    # Writer DSN publishes the derived serving copy; the reader DSN is what the
+    # dashboard is allowed to read. ``DATABASE_URL`` is the writer, and
+    # ``AURORA_IAM_AUTH=true`` swaps the password for a short-lived RDS token so
+    # no long-lived credential is stored in the task.
+    database_url: str | None = Field(
+        default=None, description="Writer DSN for the serving copy (postgresql://…)"
+    )
+    serving_database_url: str | None = Field(
+        default=None, description="Read-only DSN the dashboard uses"
+    )
+    aurora_iam_auth: bool = Field(
+        default=False, description="Use a short-lived RDS IAM auth token instead of a password"
+    )
+    pg_sslmode: str = Field(default="require")
+    pg_schema: str = Field(default="public")
+
     # ── Live API (single endpoint served from the VPS collector) ─────────
     live_api_host: str = Field(default="0.0.0.0")
     live_api_port: int = Field(default=8090, ge=1, le=65535)

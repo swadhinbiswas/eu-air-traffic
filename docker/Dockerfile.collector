@@ -8,9 +8,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --extra stream --no-install-project
+RUN uv sync --extra stream --extra aws --no-install-project
 COPY . .
-RUN uv sync --extra stream
+RUN uv sync --extra stream --extra aws
 
 EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

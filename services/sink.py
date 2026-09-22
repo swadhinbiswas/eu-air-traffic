@@ -28,7 +28,7 @@ from typing import Any
 
 from config.logging import logger, setup_logging
 from config.settings import Settings, settings
-from services import hf_lake
+from services import lake_backend
 
 
 class KafkaSink:
@@ -175,11 +175,11 @@ class KafkaSink:
         self.counts[source] = self.counts.get(source, 0) + len(records)
         if self.upload:
             prefix = self.settings.hf_bronze_prefix
-            hf_lake.upload_file(
+            lake_backend.upload_file(
                 jsonl, f"{prefix}/raw/{source}/{jsonl.parent.name}/{jsonl.name}", self.settings
             )
             if parquet is not None:
-                hf_lake.upload_file(
+                lake_backend.upload_file(
                     parquet, f"{prefix}/parquet/{source}/{parquet.name}", self.settings
                 )
         logger.info("[sink] %s rows=%s → %s", source, len(records), jsonl.name)
