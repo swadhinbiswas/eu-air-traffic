@@ -82,6 +82,41 @@ print(flights[:2])
 It is generated and documented in [`docs/huggingface-dataset.md`](docs/huggingface-dataset.md):
 layout, scripts, cadence, and the dataset card.
 
+## AWS version
+
+![AWS version: the existing Kafka event bus and Bronze/Silver DuckDB warehouse feed a serverless AWS plane — Lambda export, S3 raw landing zone, Glue Crawler, Glue ETL (PySpark), S3 curated zone, Athena, and BI tools such as QuickSight or Grafana.](images/aws-version.png)
+
+The free deployment runs this pipeline in public, at zero cost. The **AWS
+version** adds a serverless analytics plane beside it and leaves the collector
+untouched — the Kafka bus and the DuckDB warehouse stay exactly where they are:
+
+| Stage | Service | What it does | Code |
+|---|---|---|---|
+| 1. Export raw data | **AWS Lambda** | Lands the lake as raw Parquet in S3 | [`aws/lambda/bronze_export/handler.py`](aws/lambda/bronze_export/handler.py) |
+| 2. Raw storage | **Amazon S3** | Landing zone: `adsb/`, `opensky/`, `airlabs/`, `metar/`, `eurostat/`, partitioned by day | — |
+| 3. Catalog | **AWS Glue Crawler** | Scans the raw prefixes, registers tables and partitions | [`infra/terraform-serverless/`](infra/terraform-serverless/) |
+| 4. ETL / transform | **AWS Glue (PySpark)** | Cleans, types and deduplicates | [`aws/glue/etl_job.py`](aws/glue/etl_job.py) |
+| 5. Curated storage | **Amazon S3** | Curated zone: `fact/`, `dim/`, `aggregates/`, `parquet/` | — |
+| 6. Query | **Amazon Athena** | SQL over the curated Parquet via the Glue Catalog | [`aws/athena/ddl/`](aws/athena/ddl/) |
+| 7. Analytics / BI | **QuickSight / Grafana** | Dashboards and the Eurostat cross-check | [`aws/athena/queries.sql`](aws/athena/queries.sql) |
+
+The split is deliberate: stages 1–2 are the only ones that touch the existing
+system, and the whole raw zone is append-only, so a re-run can never overwrite
+history. The curated zone is derived and can be rebuilt from raw at any time.
+The Glue job deduplicates on the same business keys as the main pipeline
+(`callsign + departure + arrival + date`), so the AWS numbers agree with the
+free ones.
+
+Full build guide: [`docs/aws-version.md`](docs/aws-version.md) ·
+infrastructure: [`infra/terraform-serverless/`](infra/terraform-serverless/) ·
+application code: [`aws/`](aws/).
+
+> **Reference implementation.** The AWS stack is shipped as code to show the
+> scale path — it is **not currently provisioned**. The live site runs on the
+> free tiers above. This is the serverless trade-off (pay per query, near-zero
+> idle); the always-on managed migration — MSK, ECS, Aurora, Redshift — is
+> documented separately in [`docs/aws-deployment.md`](docs/aws-deployment.md).
+
 ## Constraints and the trade-offs behind them
 
 | Constraint | Design response |
@@ -205,11 +240,13 @@ mapping to AWS, with the trade-offs) and
 runbook: secrets, ECR, ECS, MSK, S3/Iceberg, Redshift, Aurora, CloudFront,
 observability, costs and teardown).
 
-To be explicit: **the AWS stack is a reference implementation, shipped as code
-to show the scale path — it is not currently provisioned.** What runs today is
+To be explicit: **the AWS stacks are reference implementations, shipped as code
+to show the scale path — they are not currently provisioned.** What runs today is
 the left column: the collector, the GitHub Actions pipeline and the free-tier
-serving stores, every cycle, at zero cost. `infra/terraform/` is there to prove
-the same code deploys unchanged at scale, not to describe the live system.
+serving stores, every cycle, at zero cost. There are two AWS variants: the
+serverless analytics plane in [AWS version](#aws-version)
+(`infra/terraform-serverless/`), and the always-on managed migration
+(`infra/terraform/`), both of which prove the same code scales without a rewrite.
 
 | Part | Here | Production swap |
 |---|---|---|

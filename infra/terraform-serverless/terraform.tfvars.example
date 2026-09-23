@@ -1,0 +1,74 @@
+# Copy to terraform.tfvars and adjust. Every value below is the module default,
+# repeated here so this file documents what can be changed; uncomment what you
+# touch. Nothing in this file is required for a same-account deployment — the
+# only value most operators set is alarm_email.
+
+# ── Identity / tagging ───────────────────────────────────────────────────────
+# name_prefix = "eu-air-traffic"
+# environment = "production"
+aws_region = "eu-central-1"
+
+# tags = {
+#   Owner    = "platform"
+#   CostCode = "data-eng"
+# }
+
+# ── Bucket name overrides ────────────────────────────────────────────────────
+# Empty derives <name_prefix>-<zone>-<account_id>, which is already globally
+# unique. Set these only to reuse an existing bucket name.
+# raw_bucket_name       = ""
+# curated_bucket_name   = ""
+# artifacts_bucket_name = ""
+
+# ── Bucket safety / lifecycle ────────────────────────────────────────────────
+# raw_bucket_force_destroy       = false   # true only in throwaway sandboxes
+# curated_bucket_force_destroy   = false
+# artifacts_bucket_force_destroy = false
+# raw_ia_transition_days                    = 30
+# raw_glacier_transition_days               = 90
+# noncurrent_version_expiration_days        = 90
+# abort_incomplete_multipart_upload_days    = 7
+# artifacts_expiration_days                 = 30
+
+# ── Stage 1: export Lambda ───────────────────────────────────────────────────
+# Existing managed-stack lake bucket the export reads. Empty derives
+# <name_prefix>-lake-<account_id>. Set this for a cross-account source.
+# source_bucket          = ""
+# lambda_function_name   = ""
+# lambda_memory_mb       = 512
+# lambda_timeout_seconds = 900
+# lambda_schedule_expression = "rate(1 hour)"
+# lambda_schedule_enabled    = true
+# lambda_log_level           = "INFO"
+
+# ── Stages 3-4: Glue ─────────────────────────────────────────────────────────
+# raw_database_name     = ""            # derives <name_prefix>_raw
+# curated_database_name = ""            # derives <name_prefix>_curated
+# crawler_name          = ""
+# crawler_schedule      = "cron(0 3 * * ? *)"
+# crawler_table_prefix  = ""
+# glue_job_name              = ""
+# glue_script_key            = ""       # derives glue-scripts/etl_job.py
+# glue_version               = "4.0"
+# glue_job_worker_type       = "G.1X"
+# glue_job_number_of_workers = 2
+# glue_job_timeout_minutes   = 60
+# glue_job_max_retries       = 1
+# curated_prefix             = ""
+# glue_trigger_name          = ""
+
+# ── Stage 6: Athena ──────────────────────────────────────────────────────────
+# athena_workgroup_name = ""
+# athena_bytes_scanned_cutoff_per_query = 10737418240   # 10 GiB per query
+# athena_results_prefix = "athena-results/"
+
+# ── Observability ────────────────────────────────────────────────────────────
+alarm_email            = "you@example.com"
+# log_retention_days   = 30
+# lambda_error_threshold         = 1
+# glue_failed_tasks_threshold    = 1
+# enable_glue_event_alarm        = true
+# stale_data_metric_namespace    = "EUAirTraffic/Serverless"
+# stale_data_metric_name         = "RawDataAgeSeconds"
+# stale_data_threshold_seconds   = 7200
+# enable_stale_data_alarm        = true
