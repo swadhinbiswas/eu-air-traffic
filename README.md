@@ -16,7 +16,7 @@
 Live dashboard: https://airtraffic-eu.pages.dev
 · Live API: https://vps.swadhin.cv/health
 · Data lake: https://huggingface.co/datasets/swadhinbiswas/air-traffic
-· Demo video: coming soon
+· Demo video: [Watch the YouTube demo](https://www.youtube.com/watch?v=36zh6aF64ng)
 
 A real-time and historical view of European airspace, built as a pipeline rather
 than a demo: live aircraft positions, weather, schedules, delays, emissions, and
