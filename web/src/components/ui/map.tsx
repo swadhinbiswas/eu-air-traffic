@@ -358,6 +358,11 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Dedicated host for the MapLibre canvas. MapLibre mutates this node (and
+  // we clear it on retry), so React must never render its own children into
+  // it — doing so makes React's later removeChild throw "The node to be
+  // removed is not a child of this node" and crashes the whole view.
+  const mapContainerRef = useRef<HTMLDivElement>(null);
   const [mapInstance, setMapInstance] = useState<MapLibreGL.Map | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isStyleLoaded, setIsStyleLoaded] = useState(false);
@@ -398,7 +403,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   // uncaught render error: pre-check, catch the constructor's
   // GPUInitializationError, and watch for async context loss.
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!mapContainerRef.current) return;
 
     if (!isWebGL2Supported()) {
       setWebglError(
@@ -415,12 +420,12 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
     // Drop any half-initialised DOM a previous failed constructor left
     // behind (MapLibre mutates the container before _setupPainter throws).
-    containerRef.current.innerHTML = "";
+    mapContainerRef.current.innerHTML = "";
 
     let map: MapLibreGL.Map | null = null;
     try {
       map = new MapLibreGL.Map({
-        container: containerRef.current,
+        container: mapContainerRef.current,
         style: initialStyle,
         renderWorldCopies: false,
         attributionControl: {
@@ -437,7 +442,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         ...viewport,
       });
     } catch (error) {
-      containerRef.current.innerHTML = "";
+      mapContainerRef.current.innerHTML = "";
       setWebglError(
         error instanceof Error ? error : new Error(String(error)),
       );
@@ -583,6 +588,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         ref={containerRef}
         className={cn("relative h-full w-full", className)}
       >
+        <div ref={mapContainerRef} className="absolute inset-0" />
         <MapFallback
           detail={
             webglError.message.length > 220
@@ -602,6 +608,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         ref={containerRef}
         className={cn("relative h-full w-full", className)}
       >
+        <div ref={mapContainerRef} className="absolute inset-0" />
         {(!isLoaded || loading) && <DefaultLoader />}
         {/* SSR-safe: children render only when map is loaded on client */}
         {mapInstance && children}
