@@ -101,6 +101,13 @@ export function AircraftLayer({ aircraft, visible, selectedHex, onSelect }: Airc
 
     async function setup(instance: MapLibreMap) {
       for (const band of ALT_BANDS) {
+        // Every iteration below resumes after an `await`, by which time the
+        // view may have switched and `map.remove()` torn the style down.
+        // MapLibre's hasImage/addImage read `map.style`, which is gone after
+        // removal — calling them then throws and kills the whole setup.
+        // `cancelled` flips in this effect's cleanup, which React always runs
+        // before the parent Map's cleanup removes the map.
+        if (cancelled) return;
         const id = `plane-${band.id}`;
         if (instance.hasImage(id)) continue;
         try {
@@ -111,7 +118,8 @@ export function AircraftLayer({ aircraft, visible, selectedHex, onSelect }: Airc
           /* skip band on icon failure */
         }
       }
-      if (!instance.hasImage(EMERGENCY_IMAGE)) {
+      // Guarded the same way: this runs straight after the loop's awaits.
+      if (!cancelled && !instance.hasImage(EMERGENCY_IMAGE)) {
         try {
           const image = await loadImage(planeDataUrl("#ff3b5c"));
           if (!cancelled && !instance.hasImage(EMERGENCY_IMAGE)) {
