@@ -1,9 +1,11 @@
 name: CI
 
+# Manual-only: this repository's GitHub Actions account is currently locked due
+# to a billing issue, so any automatic run fails before it starts. Run it by
+# hand from the Actions tab only when you want it to (and after billing is
+# resolved). Keeping it manual also avoids burning the monthly Actions quota.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

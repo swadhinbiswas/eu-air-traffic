@@ -3,9 +3,10 @@ name: Eurostat benchmark (monthly)
 # Official monthly passengers per EU airport, published ~2 months behind. One
 # request per month of the window; the parquet is committed so every lake run
 # and dbt build sees it without another download.
+# Manual-only: the GitHub Actions account is locked due to a billing issue, so
+# the monthly scheduled fetch fails before it starts. Run by hand from the
+# Actions tab only when you want the benchmark refreshed.
 on:
-  schedule:
-    - cron: "0 4 1 * *"
   workflow_dispatch:
 
 permissions:

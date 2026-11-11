@@ -1,19 +1,11 @@
 name: Lake (Kafka → Silver → Gold)
 
-# The VPS collector publishes to Kafka 24/7. Every 9 minutes — and on every push
-# to main — this job drains the records accumulated since the previous run
-# (Kafka consumer offset, not a query time-window), builds Silver, then dbt Gold
-# → MotherDuck → Turso.
+# Manual-only: the GitHub Actions account is locked due to a billing issue, so
+# the every-15-minute scheduled drains fail before they start (and each failure
+# opens a "Lake pipeline failed" issue). Drain by hand from the Actions tab only
+# when you want a run. The VPS collector keeps publishing to Kafka 24/7 in the
+# meantime; offsets are preserved, so a later manual run catches up.
 on:
-  schedule:
-    - cron: "*/15 * * * *" # every 15 minutes (queue-friendly, still fresh)
-  push:
-    branches: [main]
-    # Frontend-only pushes deploy through Cloudflare; they must not queue a
-    # Kafka drain behind the single-writer concurrency group.
-    paths-ignore:
-      - "web/**"
-      - "README.md"
   workflow_dispatch:
 
 concurrency:
